@@ -331,7 +331,7 @@ impl WgpuEngine {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module,
-                entry_point: vertex_main,
+                entry_point: Some(vertex_main),
                 buffers: vertex_buffer
                     .as_ref()
                     .map(core::slice::from_ref)
@@ -340,7 +340,7 @@ impl WgpuEngine {
             },
             fragment: Some(wgpu::FragmentState {
                 module,
-                entry_point: fragment_main,
+                entry_point: Some(fragment_main),
                 targets: &[Some(color_attachment)],
                 compilation_options: PipelineCompilationOptions::default(),
             }),
@@ -558,7 +558,7 @@ impl WgpuEngine {
                                 panic!("cannot issue a dispatch with a render pipeline");
                             };
                             cpass.set_pipeline(pipeline);
-                            cpass.set_bind_group(0, &bind_group, &[]);
+                            cpass.set_bind_group(0, Some(&bind_group), &[]);
                             cpass.dispatch_workgroups(x, y, z);
                             #[cfg(feature = "wgpu-profiler")]
                             profiler.end_query(&mut cpass, query);
@@ -608,7 +608,7 @@ impl WgpuEngine {
                                 panic!("cannot issue a dispatch with a render pipeline");
                             };
                             cpass.set_pipeline(pipeline);
-                            cpass.set_bind_group(0, &bind_group, &[]);
+                            cpass.set_bind_group(0, Some(&bind_group), &[]);
                             let buf = self.bind_map.get_gpu_buf(proxy.id).ok_or(
                                 Error::UnavailableBufferUsed(proxy.name, "indirect dispatch"),
                             )?;
@@ -675,7 +675,7 @@ impl WgpuEngine {
                             .ok_or(Error::UnavailableBufferUsed(proxy.name, "draw"))?;
                         rpass.set_vertex_buffer(0, buf.slice(..));
                     }
-                    rpass.set_bind_group(0, &bind_group, &[]);
+                    rpass.set_bind_group(0, Some(&bind_group), &[]);
                     rpass.draw(0..draw_params.vertex_count, 0..draw_params.instance_count);
                     #[cfg(feature = "wgpu-profiler")]
                     profiler.end_query(&mut rpass, query);
@@ -827,7 +827,7 @@ impl WgpuEngine {
             label: Some(label),
             layout: Some(&compute_pipeline_layout),
             module: &shader_module,
-            entry_point: "main",
+            entry_point: Some("main"),
             compilation_options: PipelineCompilationOptions {
                 zero_initialize_workgroup_memory: false,
                 ..Default::default()
