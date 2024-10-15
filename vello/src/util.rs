@@ -143,17 +143,6 @@ impl RenderContext {
         {
             maybe_features |= wgpu_profiler::GpuProfiler::ALL_WGPU_TIMER_FEATURES;
         };
-        let result = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: None,
-                    required_features: features & maybe_features,
-                    required_limits: limits,
-                    memory_hints: Default::default(),
-                },
-                None,
-            )
-            .await;
 
         let (device, queue) = match adapter
             .request_device(
