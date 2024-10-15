@@ -143,7 +143,19 @@ impl RenderContext {
         {
             maybe_features |= wgpu_profiler::GpuProfiler::ALL_WGPU_TIMER_FEATURES;
         };
-        let (device, queue) = adapter
+        let result = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: None,
+                    required_features: features & maybe_features,
+                    required_limits: limits,
+                    memory_hints: Default::default(),
+                },
+                None,
+            )
+            .await;
+
+        let (device, queue) = match adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
@@ -154,7 +166,14 @@ impl RenderContext {
                 None,
             )
             .await
-            .ok()?;
+        {
+            Ok(result) => result,
+            Err(e) => {
+                log::warn!("failed to get device: {:?}", e);
+                panic!("failed to get device");
+            }
+        };
+
         let device_handle = DeviceHandle {
             adapter,
             device,
