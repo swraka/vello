@@ -158,8 +158,7 @@ impl RenderContext {
         {
             Ok(result) => result,
             Err(e) => {
-                log::warn!("failed to get device: {:?}", e);
-                panic!("failed to get device");
+                panic!("{:?}", e)
             }
         };
 
