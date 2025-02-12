@@ -29,7 +29,7 @@ path = "src/main.rs"
 
 
 [dependencies]
-vello = { workspace = true, features = ["buffer_labels", "debug_layers"] }
+vello = { workspace = true, features = ["debug_layers"] }
 scenes = { workspace = true }
 
 anyhow = { workspace = true }
@@ -37,23 +37,23 @@ clap = { workspace = true, features = ["derive"] }
 pollster = { workspace = true }
 wgpu-profiler = { workspace = true, optional = true }
 
-winit = "0.30.5"
+winit = "0.30.8"
 log = { workspace = true }
 
 # We're still using env-logger, but we want to use tracing spans to allow using
 # tracing_android_trace
-tracing = { version = "0.1.40", features = ["log-always"] }
+tracing = { version = "0.1.41", features = ["log-always"] }
 # For _ci_dep_features_to_test feature tests.
 kurbo = { workspace = true, optional = true }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # We use android_logger on Android
-env_logger = "0.11.5"
+env_logger = "0.11.6"
 
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "android")))'.dependencies]
 vello = { workspace = true, features = ["hot_reload"] }
 vello_shaders = { workspace = true, features = ["compile"] }
-notify-debouncer-mini = "0.4.1"
+notify-debouncer-full = "0.5.0"
 
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -61,22 +61,22 @@ winit = { version = "0.30.5", features = ["android-native-activity"] }
 android_logger = "0.14.1"
 
 tracing_android_trace = "0.1.1"
-tracing-subscriber = { version = "0.3.18", default-features = false, features = [
+tracing-subscriber = { version = "0.3.19", default-features = false, features = [
     "std",
     "registry",
 ] }
-profiling = { version = "1.0.15", features = ["profile-with-tracing"] }
+profiling = { version = "1.0.16", features = ["profile-with-tracing"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.7"
 console_log = "1.0.0"
-wasm-bindgen-futures = "0.4.43"
-web-sys = { version = "0.3.70", features = ["HtmlCollection", "Text"] }
+wasm-bindgen-futures = "0.4.45"
+web-sys = { version = "0.3.77", features = ["HtmlCollection", "Text"] }
 web-time = { workspace = true }
 # If updating, also update in .github/workflows/web-demo.yml
-wasm-bindgen = "=0.2.95"
+wasm-bindgen = "=0.2.100"
 
 [target.wasm32-unknown-unknown.dependencies]
 # We have a transitive dependency on getrandom and it does not automatically
 # support wasm32-unknown-unknown. We need to enable the js feature.
-getrandom = { version = "0.2.15", features = ["js"] }
+getrandom = { version = "0.3.1", features = ["wasm_js"] }

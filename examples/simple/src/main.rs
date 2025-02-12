@@ -1,21 +1,25 @@
 // Copyright 2024 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+//! Simple example.
+
 use anyhow::Result;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use vello::kurbo::{Affine, Circle, Ellipse, Line, RoundedRect, Stroke};
+use vello::peniko::color::palette;
 use vello::peniko::Color;
 use vello::util::{RenderContext, RenderSurface};
 use vello::{AaConfig, Renderer, RendererOptions, Scene};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::*;
+use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::Window;
 
 use vello::wgpu;
-// Simple struct to hold the state of the renderer
+/// Simple struct to hold the state of the renderer
+#[derive(Debug)]
 pub struct ActiveRenderState<'s> {
     // The fields MUST be in this order, so that the surface is dropped before the window
     surface: RenderSurface<'s>,
@@ -45,7 +49,7 @@ struct SimpleVelloApp<'s> {
     scene: Scene,
 }
 
-impl<'s> ApplicationHandler for SimpleVelloApp<'s> {
+impl ApplicationHandler for SimpleVelloApp<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let RenderState::Suspended(cached_window) = &mut self.state else {
             return;
@@ -127,23 +131,17 @@ impl<'s> ApplicationHandler for SimpleVelloApp<'s> {
                 // Get a handle to the device
                 let device_handle = &self.context.devices[surface.dev_id];
 
-                // Get the surface's texture
-                let surface_texture = surface
-                    .surface
-                    .get_current_texture()
-                    .expect("failed to get surface texture");
-
-                // Render to the surface's texture
+                // Render to a texture, which we will later copy into the surface
                 self.renderers[surface.dev_id]
                     .as_mut()
                     .unwrap()
-                    .render_to_surface(
+                    .render_to_texture(
                         &device_handle.device,
                         &device_handle.queue,
                         &self.scene,
-                        &surface_texture,
+                        &surface.target_view,
                         &vello::RenderParams {
-                            base_color: Color::BLACK, // Background color
+                            base_color: palette::css::BLACK, // Background color
                             width,
                             height,
                             antialiasing_method: AaConfig::Msaa16,
@@ -151,6 +149,28 @@ impl<'s> ApplicationHandler for SimpleVelloApp<'s> {
                     )
                     .expect("failed to render to surface");
 
+                // Get the surface's texture
+                let surface_texture = surface
+                    .surface
+                    .get_current_texture()
+                    .expect("failed to get surface texture");
+
+                // Perform the copy
+                let mut encoder =
+                    device_handle
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Surface Blit"),
+                        });
+                surface.blitter.copy(
+                    &device_handle.device,
+                    &mut encoder,
+                    &surface.target_view,
+                    &surface_texture
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default()),
+                );
+                device_handle.queue.submit([encoder.finish()]);
                 // Queue the texture to be presented on the surface
                 surface_texture.present();
 
@@ -188,11 +208,10 @@ fn create_winit_window(event_loop: &ActiveEventLoop) -> Arc<Window> {
 }
 
 /// Helper function that creates a vello `Renderer` for a given `RenderContext` and `RenderSurface`
-fn create_vello_renderer(render_cx: &RenderContext, surface: &RenderSurface) -> Renderer {
+fn create_vello_renderer(render_cx: &RenderContext, surface: &RenderSurface<'_>) -> Renderer {
     Renderer::new(
         &render_cx.devices[surface.dev_id].device,
         RendererOptions {
-            surface_format: Some(surface.format),
             use_cpu: false,
             antialiasing_support: vello::AaSupport::all(),
             num_init_threads: NonZeroUsize::new(1),
@@ -207,12 +226,12 @@ fn add_shapes_to_scene(scene: &mut Scene) {
     // Draw an outlined rectangle
     let stroke = Stroke::new(6.0);
     let rect = RoundedRect::new(10.0, 10.0, 240.0, 240.0, 20.0);
-    let rect_stroke_color = Color::rgb(0.9804, 0.702, 0.5294);
+    let rect_stroke_color = Color::new([0.9804, 0.702, 0.5294, 1.]);
     scene.stroke(&stroke, Affine::IDENTITY, rect_stroke_color, None, &rect);
 
     // Draw a filled circle
     let circle = Circle::new((420.0, 200.0), 120.0);
-    let circle_fill_color = Color::rgb(0.9529, 0.5451, 0.6588);
+    let circle_fill_color = Color::new([0.9529, 0.5451, 0.6588, 1.]);
     scene.fill(
         vello::peniko::Fill::NonZero,
         Affine::IDENTITY,
@@ -223,7 +242,7 @@ fn add_shapes_to_scene(scene: &mut Scene) {
 
     // Draw a filled ellipse
     let ellipse = Ellipse::new((250.0, 420.0), (100.0, 160.0), -90.0);
-    let ellipse_fill_color = Color::rgb(0.7961, 0.651, 0.9686);
+    let ellipse_fill_color = Color::new([0.7961, 0.651, 0.9686, 1.]);
     scene.fill(
         vello::peniko::Fill::NonZero,
         Affine::IDENTITY,
@@ -234,6 +253,6 @@ fn add_shapes_to_scene(scene: &mut Scene) {
 
     // Draw a straight line
     let line = Line::new((260.0, 20.0), (620.0, 100.0));
-    let line_stroke_color = Color::rgb(0.5373, 0.7059, 0.9804);
+    let line_stroke_color = Color::new([0.5373, 0.7059, 0.9804, 1.]);
     scene.stroke(&stroke, Affine::IDENTITY, line_stroke_color, None, &line);
 }

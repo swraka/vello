@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use bytemuck::{Pod, Zeroable};
-use peniko::{BlendMode, Color};
+use peniko::{
+    color::{AlphaColor, ColorSpace, DynamicColor, OpaqueColor, PremulColor, Srgb},
+    BlendMode,
+};
 
 use super::Monoid;
 
@@ -28,7 +31,7 @@ impl DrawTag {
     pub const SWEEP_GRADIENT: Self = Self(0x254);
 
     /// Image fill.
-    pub const IMAGE: Self = Self(0x248);
+    pub const IMAGE: Self = Self(0x28C); // info: 10, scene: 3
 
     /// Blurred rounded rectangle.
     pub const BLUR_RECT: Self = Self(0x2d4); // info: 11, scene: 5 (DrawBlurRoundedRect)
@@ -65,16 +68,48 @@ pub struct DrawBbox {
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 #[repr(C)]
 pub struct DrawColor {
-    /// Packed little endian RGBA premultiplied color with the alpha component
-    /// in the low byte.
+    /// Packed little-endian RGBA premultiplied color with the red component in the low byte, i.e.,
+    /// with `r` the least significant byte and `a` the most significant.
     pub rgba: u32,
 }
 
-impl DrawColor {
-    /// Creates new solid color draw data.
-    pub fn new(color: Color) -> Self {
+impl<CS: ColorSpace> From<AlphaColor<CS>> for DrawColor {
+    fn from(color: AlphaColor<CS>) -> Self {
         Self {
-            rgba: color.to_premul_u32(),
+            rgba: color.convert::<Srgb>().premultiply().to_rgba8().to_u32(),
+        }
+    }
+}
+
+impl From<DynamicColor> for DrawColor {
+    fn from(color: DynamicColor) -> Self {
+        Self {
+            rgba: color
+                .to_alpha_color::<Srgb>()
+                .premultiply()
+                .to_rgba8()
+                .to_u32(),
+        }
+    }
+}
+
+impl<CS: ColorSpace> From<OpaqueColor<CS>> for DrawColor {
+    fn from(color: OpaqueColor<CS>) -> Self {
+        Self {
+            rgba: color
+                .convert::<Srgb>()
+                .with_alpha(1.)
+                .premultiply()
+                .to_rgba8()
+                .to_u32(),
+        }
+    }
+}
+
+impl<CS: ColorSpace> From<PremulColor<CS>> for DrawColor {
+    fn from(color: PremulColor<CS>) -> Self {
+        Self {
+            rgba: color.convert::<Srgb>().to_rgba8().to_u32(),
         }
     }
 }
@@ -129,6 +164,9 @@ pub struct DrawImage {
     pub xy: u32,
     /// Packed image dimensions.
     pub width_height: u32,
+    /// Packed quality, extend mode and 8-bit alpha (bits `qqxxyyaaaaaaaa`,
+    /// 18 unused prefix bits).
+    pub sample_alpha: u32,
 }
 
 /// Draw data for a blurred rounded rectangle.
@@ -161,7 +199,7 @@ impl DrawBeginClip {
     /// Creates new clip draw data.
     pub fn new(blend_mode: BlendMode, alpha: f32) -> Self {
         Self {
-            blend_mode: (blend_mode.mix as u32) << 8 | blend_mode.compose as u32,
+            blend_mode: ((blend_mode.mix as u32) << 8) | blend_mode.compose as u32,
             alpha,
         }
     }
@@ -200,5 +238,31 @@ impl Monoid for DrawMonoid {
             scene_offset: self.scene_offset + other.scene_offset,
             info_offset: self.info_offset + other.info_offset,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use peniko::Color;
+
+    use super::DrawColor;
+
+    #[test]
+    fn draw_color_endianness() {
+        // `DrawColor` should be packed little-endian with red the least significant byte.
+        //
+        // If this changes intentionally, the `DrawColor` docs also need updating.
+        let c = Color::from_rgba8(0x00, 0xca, 0xfe, 0xff);
+        assert_eq!(
+            bytemuck::bytes_of(&DrawColor::from(c)),
+            [0x00, 0xca, 0xfe, 0xff]
+        );
+    }
+
+    #[test]
+    fn draw_color_premultiplied() {
+        // If this changes intentionally, the `DrawColor` docs also need updating.
+        let c = Color::from_rgba8(0x00, 0xca, 0xfe, 0x00);
+        assert_eq!(DrawColor::from(c).rgba, 0);
     }
 }

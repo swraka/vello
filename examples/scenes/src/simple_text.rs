@@ -3,9 +3,12 @@
 
 use std::sync::Arc;
 
+use skrifa::{
+    raw::{FileRef, FontRef},
+    MetadataProvider,
+};
 use vello::kurbo::Affine;
-use vello::peniko::{Blob, Brush, BrushRef, Color, Font, StyleRef};
-use vello::skrifa::{raw::FontRef, MetadataProvider};
+use vello::peniko::{color::palette, Blob, Brush, BrushRef, Fill, Font, StyleRef};
 use vello::{Glyph, Scene};
 
 // This is very much a hack to get things working.
@@ -24,8 +27,11 @@ pub struct SimpleText {
     noto_emoji_cbtf_subset: Font,
 }
 
+#[expect(
+    single_use_lifetimes,
+    reason = "False positive: https://github.com/rust-lang/rust/issues/129255"
+)]
 impl SimpleText {
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             roboto: Font::new(Blob::new(Arc::new(ROBOTO_FONT)), 0),
@@ -43,7 +49,6 @@ impl SimpleText {
     ///
     /// Note that Vello does support COLR emoji, but does not currently support
     /// any other forms of emoji.
-    #[allow(clippy::too_many_arguments)]
     pub fn add_colr_emoji_run<'a>(
         &mut self,
         scene: &mut Scene,
@@ -60,7 +65,7 @@ impl SimpleText {
             size,
             &[],
             // This should be unused
-            &Brush::Solid(Color::WHITE),
+            &Brush::Solid(palette::css::WHITE),
             transform,
             glyph_transform,
             style,
@@ -75,7 +80,6 @@ impl SimpleText {
     /// not significantly increasing repository size.
     ///
     /// This will use a CBTF font, which Vello supports.
-    #[allow(clippy::too_many_arguments)]
     pub fn add_bitmap_emoji_run<'a>(
         &mut self,
         scene: &mut Scene,
@@ -92,7 +96,7 @@ impl SimpleText {
             size,
             &[],
             // This should be unused
-            &Brush::Solid(Color::WHITE),
+            &Brush::Solid(palette::css::WHITE),
             transform,
             glyph_transform,
             style,
@@ -100,7 +104,6 @@ impl SimpleText {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn add_run<'a>(
         &mut self,
         scene: &mut Scene,
@@ -125,7 +128,6 @@ impl SimpleText {
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn add_var_run<'a>(
         &mut self,
         scene: &mut Scene,
@@ -148,20 +150,20 @@ impl SimpleText {
         let brush = brush.into();
         let style = style.into();
         let axes = font_ref.axes();
-        let font_size = vello::skrifa::instance::Size::new(size);
+        let font_size = skrifa::instance::Size::new(size);
         let var_loc = axes.location(variations.iter().copied());
         let charmap = font_ref.charmap();
         let metrics = font_ref.metrics(font_size, &var_loc);
         let line_height = metrics.ascent - metrics.descent + metrics.leading;
         let glyph_metrics = font_ref.glyph_metrics(font_size, &var_loc);
-        let mut pen_x = 0f32;
-        let mut pen_y = 0f32;
+        let mut pen_x = 0_f32;
+        let mut pen_y = 0_f32;
         scene
             .draw_glyphs(font)
             .font_size(size)
             .transform(transform)
             .glyph_transform(glyph_transform)
-            .normalized_coords(var_loc.coords())
+            .normalized_coords(bytemuck::cast_slice(var_loc.coords()))
             .brush(brush)
             .hint(false)
             .draw(
@@ -194,8 +196,7 @@ impl SimpleText {
         transform: Affine,
         text: &str,
     ) {
-        use vello::peniko::Fill;
-        let brush = brush.unwrap_or(&Brush::Solid(Color::WHITE));
+        let brush = brush.unwrap_or(&Brush::Solid(palette::css::WHITE));
         self.add_run(
             scene,
             font,
@@ -209,8 +210,13 @@ impl SimpleText {
     }
 }
 
+impl Default for SimpleText {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn to_font_ref(font: &Font) -> Option<FontRef<'_>> {
-    use vello::skrifa::raw::FileRef;
     let file_ref = FileRef::new(font.data.as_ref()).ok()?;
     match file_ref {
         FileRef::Font(font) => Some(font),

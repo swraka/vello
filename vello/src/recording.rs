@@ -13,10 +13,10 @@ pub struct ShaderId(pub usize);
 pub struct ResourceId(pub NonZeroU64);
 
 impl ResourceId {
-    pub fn next() -> ResourceId {
+    pub fn next() -> Self {
         // We initialize with 1 so that the conversion below succeeds
         static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
-        ResourceId(NonZeroU64::new(ID_COUNTER.fetch_add(1, Ordering::Relaxed)).unwrap())
+        Self(NonZeroU64::new(ID_COUNTER.fetch_add(1, Ordering::Relaxed)).unwrap())
     }
 }
 
@@ -82,6 +82,7 @@ pub enum Command {
     // Alternative: provide bufs & images as separate sequences
     Dispatch(ShaderId, (u32, u32, u32), Vec<ResourceProxy>),
     DispatchIndirect(ShaderId, BufferProxy, u64, Vec<ResourceProxy>),
+    #[cfg(feature = "debug_layers")]
     Draw(DrawParams),
 }
 
@@ -101,6 +102,7 @@ pub enum BindType {
     // TODO: Uniform, Sampler, maybe others
 }
 
+#[cfg(feature = "debug_layers")]
 pub struct DrawParams {
     pub shader_id: ShaderId,
     pub instance_count: u32,
@@ -168,7 +170,6 @@ impl Recording {
     /// Dispatch a compute shader where the size is determined dynamically.
     /// The `buf` argument contains the dispatch size, 3 `u32` values beginning
     /// at the given byte `offset`.
-    #[allow(unused)]
     pub fn dispatch_indirect<R>(
         &mut self,
         shader: ShaderId,
@@ -183,6 +184,7 @@ impl Recording {
         self.push(Command::DispatchIndirect(shader, buf, offset, r));
     }
 
+    #[cfg(feature = "debug_layers")]
     /// Issue a draw call
     pub fn draw(&mut self, params: DrawParams) {
         self.push(Command::Draw(params));
@@ -234,7 +236,7 @@ impl BufferProxy {
     pub fn new(size: u64, name: &'static str) -> Self {
         let id = ResourceId::next();
         debug_assert!(size > 0);
-        BufferProxy { id, size, name }
+        Self { id, size, name }
     }
 }
 
@@ -248,11 +250,11 @@ impl ImageFormat {
     }
 
     #[cfg(feature = "wgpu")]
-    pub fn from_wgpu(format: wgpu::TextureFormat) -> Self {
+    pub fn from_wgpu(format: wgpu::TextureFormat) -> Option<Self> {
         match format {
-            wgpu::TextureFormat::Rgba8Unorm => Self::Rgba8,
-            wgpu::TextureFormat::Bgra8Unorm => Self::Bgra8,
-            _ => unimplemented!(),
+            wgpu::TextureFormat::Rgba8Unorm => Some(Self::Rgba8),
+            wgpu::TextureFormat::Bgra8Unorm => Some(Self::Bgra8),
+            _ => None,
         }
     }
 }
@@ -260,7 +262,7 @@ impl ImageFormat {
 impl ImageProxy {
     pub fn new(width: u32, height: u32, format: ImageFormat) -> Self {
         let id = ResourceId::next();
-        ImageProxy {
+        Self {
             width,
             height,
             format,

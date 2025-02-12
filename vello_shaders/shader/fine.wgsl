@@ -1,17 +1,10 @@
 // Copyright 2022 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT OR Unlicense
 
-// Fine rasterizer. This can run in simple (just path rendering) and full
-// modes, controllable by #define.
+// Fine rasterizer.
 //
 // To enable multisampled rendering, turn on both the msaa ifdef and one of msaa8
 // or msaa16.
-
-#ifdef r8
-// The R8 variant is only available via an internal extension in Dawn native
-// (see https://dawn.googlesource.com/dawn/+/refs/heads/main/docs/tint/extensions/chromium_internal_graphite.md).
-#enable chromium_internal_graphite;
-#endif
 
 struct Tile {
     backdrop: i32,
@@ -30,7 +23,11 @@ var<storage> segments: array<Segment>;
 #import blend
 #import ptcl
 
-let GRADIENT_WIDTH = 512;
+const GRADIENT_WIDTH = 512;
+
+const IMAGE_QUALITY_LOW = 0u;
+const IMAGE_QUALITY_MEDIUM = 1u;
+const IMAGE_QUALITY_HIGH = 2u;
 
 @group(0) @binding(2)
 var<storage> ptcl: array<u32>;
@@ -42,49 +39,39 @@ var<storage> info: array<u32>;
 var<storage, read_write> blend_spill: array<u32>;
 
 @group(0) @binding(5)
-#ifdef r8
-var output: texture_storage_2d<r8unorm, write>;
-#else
 var output: texture_storage_2d<rgba8unorm, write>;
-#endif
 
-#ifdef full
 @group(0) @binding(6)
 var gradients: texture_2d<f32>;
 
 @group(0) @binding(7)
 var image_atlas: texture_2d<f32>;
-#endif
 
 // MSAA-only bindings and utilities
 #ifdef msaa
 
-#ifdef full
 const MASK_LUT_INDEX: u32 = 8;
-#else
-const MASK_LUT_INDEX: u32 = 6;
-#endif
 
 #ifdef msaa8
-let MASK_WIDTH = 32u;
-let MASK_HEIGHT = 32u;
-let SH_SAMPLES_SIZE = 512u;
-let SAMPLE_WORDS_PER_PIXEL = 2u;
+const MASK_WIDTH = 32u;
+const MASK_HEIGHT = 32u;
+const SH_SAMPLES_SIZE = 512u;
+const SAMPLE_WORDS_PER_PIXEL = 2u;
 // This might be better in uniform, but that has 16 byte alignment
 @group(0) @binding(MASK_LUT_INDEX)
 var<storage> mask_lut: array<u32, 256u>;
 #endif
 
 #ifdef msaa16
-let MASK_WIDTH = 64u;
-let MASK_HEIGHT = 64u;
-let SH_SAMPLES_SIZE = 1024u;
-let SAMPLE_WORDS_PER_PIXEL = 4u;
+const MASK_WIDTH = 64u;
+const MASK_HEIGHT = 64u;
+const SH_SAMPLES_SIZE = 1024u;
+const SAMPLE_WORDS_PER_PIXEL = 4u;
 @group(0) @binding(MASK_LUT_INDEX)
 var<storage> mask_lut: array<u32, 2048u>;
 #endif
 
-let WG_SIZE = 64u;
+const WG_SIZE = 64u;
 var<workgroup> sh_count: array<u32, WG_SIZE>;
 
 // This array contains the winding number of the top left corner of each
@@ -125,11 +112,11 @@ fn span(a: f32, b: f32) -> u32 {
     return u32(max(ceil(max(a, b)) - floor(min(a, b)), 1.0));
 }
 
-let SEG_SIZE = 5u;
+const SEG_SIZE = 5u;
 
 // See cpu_shaders/util.rs for explanation of these.
-let ONE_MINUS_ULP: f32 = 0.99999994;
-let ROBUST_EPSILON: f32 = 2e-7;
+const ONE_MINUS_ULP: f32 = 0.99999994;
+const ROBUST_EPSILON: f32 = 2e-7;
 
 // Multisampled path rendering algorithm.
 //
@@ -822,12 +809,17 @@ fn read_image(cmd_ix: u32) -> CmdImage {
     let xlat = vec2(bitcast<f32>(info[info_offset + 4u]), bitcast<f32>(info[info_offset + 5u]));
     let xy = info[info_offset + 6u];
     let width_height = info[info_offset + 7u];
+    let sample_alpha = info[info_offset + 8u];
+    let alpha = f32(sample_alpha & 0xFFu) / 255.0;
+    let quality = sample_alpha >> 12u;
+    let x_extend = (sample_alpha >> 10u) & 0x3u;
+    let y_extend = (sample_alpha >> 8u) & 0x3u;
     // The following are not intended to be bitcasts
     let x = f32(xy >> 16u);
     let y = f32(xy & 0xffffu);
     let width = f32(width_height >> 16u);
     let height = f32(width_height & 0xffffu);
-    return CmdImage(matrx, xlat, vec2(x, y), vec2(width, height));
+    return CmdImage(matrx, xlat, vec2(x, y), vec2(width, height), x_extend, y_extend, quality, alpha);
 }
 
 fn read_end_clip(cmd_ix: u32) -> CmdEndClip {
@@ -853,7 +845,7 @@ fn extend_mode(t: f32, mode: u32) -> f32 {
     }
 }
 
-let PIXELS_PER_THREAD = 4u;
+const PIXELS_PER_THREAD = 4u;
 
 #ifndef msaa
 
@@ -937,8 +929,9 @@ fn main(
     let xy = vec2(f32(global_id.x * PIXELS_PER_THREAD), f32(global_id.y));
     let local_xy = vec2(f32(local_id.x * PIXELS_PER_THREAD), f32(local_id.y));
     var rgba: array<vec4<f32>, PIXELS_PER_THREAD>;
+    let base_color = unpack4x8unorm(config.base_color);
     for (var i = 0u; i < PIXELS_PER_THREAD; i += 1u) {
-        rgba[i] = unpack4x8unorm(config.base_color).wzyx;
+        rgba[i] = base_color;
     }
     var blend_stack: array<array<u32, PIXELS_PER_THREAD>, BLEND_STACK_SPLIT>;
     var clip_depth = 0u;
@@ -970,7 +963,7 @@ fn main(
             }
             case CMD_COLOR: {
                 let color = read_color(cmd_ix);
-                let fg = unpack4x8unorm(color.rgba_color).wzyx;
+                let fg = unpack4x8unorm(color.rgba_color);
                 for (var i = 0u; i < PIXELS_PER_THREAD; i += 1u) {
                     let fg_i = fg * area[i];
                     rgba[i] = rgba[i] * (1.0 - fg_i.a) + fg_i;
@@ -1043,6 +1036,8 @@ fn main(
 
                 let scale = 0.5 * erf7(inv_std_dev * 0.5 * (max(width, height) - 0.5 * blur.radius));
 
+                let blur_rgba = unpack4x8unorm(blur.rgba_color);
+
                 for (var i = 0u; i < PIXELS_PER_THREAD; i += 1u) {
                     // Transform fragment location to local 'uv' space of the rounded rectangle.
                     let my_xy = vec2(xy.x + f32(i), xy.y);
@@ -1061,13 +1056,12 @@ fn main(
                     let d = d_pos + d_neg - r1;
                     let alpha = scale * (erf7(inv_std_dev * (min_edge + d)) - erf7(inv_std_dev * d));
 
-                    let fg_rgba = unpack4x8unorm(blur.rgba_color).wzyx * alpha;
+                    let fg_rgba = blur_rgba * alpha;
                     let fg_i = fg_rgba * area[i];
                     rgba[i] = rgba[i] * (1.0 - fg_i.a) + fg_i;
                 }
                 cmd_ix += 3u;
             }
-#ifdef full
             case CMD_LIN_GRAD: {
                 let lin = read_lin_grad(cmd_ix);
                 let d = lin.line_x * xy.x + lin.line_y * xy.y + lin.line_c;
@@ -1161,31 +1155,56 @@ fn main(
             case CMD_IMAGE: {
                 let image = read_image(cmd_ix);
                 let atlas_max = image.atlas_offset + image.extents - vec2(1.0);
-                for (var i = 0u; i < PIXELS_PER_THREAD; i += 1u) {
-                    // We only need to load from the textures if the value will be used.
-                    if area[i] != 0.0 {
-                        let my_xy = vec2(xy.x + f32(i), xy.y);
-                        let atlas_uv = image.matrx.xy * my_xy.x + image.matrx.zw * my_xy.y + image.xlat + image.atlas_offset - vec2(0.5);
-                        // This currently only implements the Pad extend mode
-                        // TODO: Support repeat and reflect
-                        // TODO: If the image couldn't be added to the atlas (i.e. was too big), this isn't robust
-                        let atlas_uv_clamped = clamp(atlas_uv, image.atlas_offset, atlas_max);
-                        // We know that the floor and ceil are within the atlas area because atlas_max and
-                        // atlas_offset are integers
-                        let uv_quad = vec4(floor(atlas_uv_clamped), ceil(atlas_uv_clamped));
-                        let uv_frac = fract(atlas_uv);
-                        let a = premul_alpha(textureLoad(image_atlas, vec2<i32>(uv_quad.xy), 0));
-                        let b = premul_alpha(textureLoad(image_atlas, vec2<i32>(uv_quad.xw), 0));
-                        let c = premul_alpha(textureLoad(image_atlas, vec2<i32>(uv_quad.zy), 0));
-                        let d = premul_alpha(textureLoad(image_atlas, vec2<i32>(uv_quad.zw), 0));
-                        let fg_rgba = mix(mix(a, b, uv_frac.y), mix(c, d, uv_frac.y), uv_frac.x);
-                        let fg_i = fg_rgba * area[i];
-                        rgba[i] = rgba[i] * (1.0 - fg_i.a) + fg_i;
+                let extents_inv = vec2(1.0) / image.extents;
+                switch image.quality {
+                    case IMAGE_QUALITY_LOW: {
+                        for (var i = 0u; i < PIXELS_PER_THREAD; i += 1u) {
+                            // We only need to load from the textures if the value will be used.
+                            if area[i] != 0.0 {
+                                let my_xy = vec2(xy.x + f32(i), xy.y);
+                                var atlas_uv = image.matrx.xy * my_xy.x + image.matrx.zw * my_xy.y + image.xlat;
+                                atlas_uv.x = extend_mode(atlas_uv.x * extents_inv.x, image.x_extend_mode) * image.extents.x;
+                                atlas_uv.y = extend_mode(atlas_uv.y * extents_inv.y, image.y_extend_mode) * image.extents.y;
+                                atlas_uv = atlas_uv + image.atlas_offset;
+                                // TODO: If the image couldn't be added to the atlas (i.e. was too big), this isn't robust
+                                let atlas_uv_clamped = clamp(atlas_uv, image.atlas_offset, atlas_max);
+                                // Nearest neighbor sampling
+                                let fg_rgba = premul_alpha(textureLoad(image_atlas, vec2<i32>(atlas_uv_clamped), 0));
+                                let fg_i = fg_rgba * area[i] * image.alpha;
+                                rgba[i] = rgba[i] * (1.0 - fg_i.a) + fg_i;
+                            }
+                        }
+                    }
+                    case IMAGE_QUALITY_MEDIUM, default: {
+                        // We don't have an implementation for `IMAGE_QUALITY_HIGH` yet, just use the same as medium                        
+                        for (var i = 0u; i < PIXELS_PER_THREAD; i += 1u) {
+                            // We only need to load from the textures if the value will be used.
+                            if area[i] != 0.0 {
+                                let my_xy = vec2(xy.x + f32(i), xy.y);
+                                var atlas_uv = image.matrx.xy * my_xy.x + image.matrx.zw * my_xy.y + image.xlat;
+                                atlas_uv.x = extend_mode(atlas_uv.x * extents_inv.x, image.x_extend_mode) * image.extents.x;
+                                atlas_uv.y = extend_mode(atlas_uv.y * extents_inv.y, image.y_extend_mode) * image.extents.y;
+                                atlas_uv = atlas_uv + image.atlas_offset - vec2(0.5);
+                                // TODO: If the image couldn't be added to the atlas (i.e. was too big), this isn't robust
+                                let atlas_uv_clamped = clamp(atlas_uv, image.atlas_offset, atlas_max);
+                                // We know that the floor and ceil are within the atlas area because atlas_max and
+                                // atlas_offset are integers
+                                let uv_quad = vec4(floor(atlas_uv_clamped), ceil(atlas_uv_clamped));
+                                let uv_frac = fract(atlas_uv);
+                                let a = premul_alpha(textureLoad(image_atlas, vec2<i32>(uv_quad.xy), 0));
+                                let b = premul_alpha(textureLoad(image_atlas, vec2<i32>(uv_quad.xw), 0));
+                                let c = premul_alpha(textureLoad(image_atlas, vec2<i32>(uv_quad.zy), 0));
+                                let d = premul_alpha(textureLoad(image_atlas, vec2<i32>(uv_quad.zw), 0));
+                                // Bilinear sampling
+                                let fg_rgba = mix(mix(a, b, uv_frac.y), mix(c, d, uv_frac.y), uv_frac.x);
+                                let fg_i = fg_rgba * area[i] * image.alpha;
+                                rgba[i] = rgba[i] * (1.0 - fg_i.a) + fg_i;
+                            }
+                        }
                     }
                 }
                 cmd_ix += 2u;
             }
-#endif // full
             default: {}
         }
     }

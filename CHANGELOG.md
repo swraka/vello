@@ -8,16 +8,51 @@ Subheadings to categorize changes are `added, changed, deprecated, removed, fixe
 
 # Changelog
 
-The latest published Vello release is [0.3.0](#030---2024-10-04) which was released on 2024-10-04.
-You can find its changes [documented below](#030---2024-10-04).
+The latest published Vello release is [0.4.0](#040---2025-01-20) which was released on 2025-01-20.
+You can find its changes [documented below](#040---2025-01-20).
 
 ## [Unreleased]
 
-This release has an [MSRV][] of 1.75.
+This release has an [MSRV][] of 1.82.
+
+<!-- TODO: Wgpu 24 (#791); override_image change (#802) -->
+
+## Removed
+
+- Breaking: The `Renderer::render_to_surface` has been removed. ([#803][] by [@DJMcNab][])
+  This API was not fit for purpose for several reasons, for example, it assumed that you would only ever use a single window.
+  The new recommended way to use Vello to render to a surface is to use `Renderer::render_to_texture`, then copy from that to the surface yourself.
+  This can use the new [`TextureBlitter`](https://docs.rs/wgpu/latest/wgpu/util/struct.TextureBlitter.html) type from `wgpu` for this blitting.
+  The `util` module has been updated to create a blit pipeline and intermediate texture for each surface.
+
+## [0.4.0][] - 2025-01-20
+
+This release has an [MSRV][] of 1.82.
+
+### Highlights
+
+As part of an initiative to improve color handling across the ecosystem (and especially within Linebender crates), Vello is now using the new [`color`] crate.
+This is the first step towards providing richer color functionality, better handling of color interpolation, and more.
+
+This release intentionally uses `wgpu` 23.0.1 rather than 24.0.0 so that it can match the version used in Bevy 0.15.
+
+### Changed
+
+- Breaking: Updated `wgpu` to 23.0.1 ([#735][], [#743][] by [@waywardmonkeys])
+- Breaking: Updated to new `peniko` and `color` is now used for all colors ([#742][] by [@waywardmonkeys])
+- Breaking: As part of the update to `color`, the byte order of `vello_encoding::DrawColor` is changed ([#758][] by [@waywardmonkeys][], [#796][] by [@tomcur][]).
+- Breaking: The `full` feature is no longer present as the full pipeline is now always built ([#754][] by [@waywardmonkeys])
+- The `r8` permutation of the shaders is no longer available ([#756][] by [@waywardmonkeys])
+- Breaking: The `buffer_labels` feature is no longer present as the labels are always configured ([#757][] by [@waywardmonkeys])
+- Breaking: Use a type alias for `i16` rather than `skrifa::NormalizedCoord` in the public API ([#747][] by [@nicoburns][])
 
 ### Fixed
 
 - Offset in image rendering, and sampling outside correct atlas area ([#722][] by [@dfrg])
+- Inference conflict when using Kurbo's `schemars` feature ([#733][] by [@ratmice][])
+- Detection of PNG format bitmap fonts, primarily for Apple systems ([#740][] by [@LaurenzV])
+- Support image extend modes, nearest-neighbor sampling and alpha ([#766][] by [@dfrg])
+- Correct vertical offset for Apple Color Emoji ([#792][] by [@dfrg])
 
 ## [0.3.0][] - 2024-10-04
 
@@ -127,10 +162,14 @@ This release has an [MSRV][] of 1.75.
 [@dfrg]: https://github.com/drfg
 [@DJMcNab]: https://github.com/DJMcNab
 [@kmoon2437]: https://github.com/kmoon2437
+[@LaurenzV]: https://github.com/LaurenzV
 [@msiglreith]: https://github.com/msiglreith
+[@nicoburns]: https://github.com/nicoburns
+[@ratmice]: https://github.com/ratmice
 [@simbleau]: https://github.com/simbleau
 [@TheNachoBIT]: https://github.com/TheNachoBIT
 [@timtom-dev]: https://github.com/timtom-dev
+[@tomcur]: https://github.com/tomcur
 [@TrueDoctor]: https://github.com/TrueDoctor
 [@waywardmonkeys]: https://github.com/waywardmonkeys
 [@yutannihilation]: https://github.com/yutannihilation
@@ -191,8 +230,23 @@ This release has an [MSRV][] of 1.75.
 [#706]: https://github.com/linebender/vello/pull/706
 [#711]: https://github.com/linebender/vello/pull/711
 [#722]: https://github.com/linebender/vello/pull/722
+[#733]: https://github.com/linebender/vello/pull/733
+[#735]: https://github.com/linebender/vello/pull/735
+[#740]: https://github.com/linebender/vello/pull/740
+[#742]: https://github.com/linebender/vello/pull/742
+[#743]: https://github.com/linebender/vello/pull/743
+[#747]: https://github.com/linebender/vello/pull/747
+[#754]: https://github.com/linebender/vello/pull/754
+[#756]: https://github.com/linebender/vello/pull/756
+[#757]: https://github.com/linebender/vello/pull/757
+[#758]: https://github.com/linebender/vello/pull/758
+[#766]: https://github.com/linebender/vello/pull/766
+[#792]: https://github.com/linebender/vello/pull/792
+[#796]: https://github.com/linebender/vello/pull/796
+[#803]: https://github.com/linebender/vello/pull/803
 
-[Unreleased]: https://github.com/linebender/vello/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/linebender/vello/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/linebender/vello/compare/v0.3.0...v0.4.0
 <!-- Note that this still comparing against 0.2.0, because 0.2.1 is a cherry-picked patch -->
 [0.3.0]: https://github.com/linebender/vello/compare/v0.2.0...v0.3.0
 [0.2.1]: https://github.com/linebender/vello/compare/v0.2.0...v0.2.1
@@ -202,3 +256,4 @@ This release has an [MSRV][] of 1.75.
 [MSRV]: README.md#minimum-supported-rust-version-msrv
 [`run_app`]: https://docs.rs/winit/latest/winit/event_loop/struct.EventLoop.html#method.run_app
 [stroke-expansion]: https://linebender.org/gpu-stroke-expansion-paper/
+[`color`]: https://docs.rs/color/

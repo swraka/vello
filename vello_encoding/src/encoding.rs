@@ -1,20 +1,15 @@
 // Copyright 2022 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use super::{DrawBlurRoundedRect, DrawColor, DrawTag, PathEncoder, PathTag, Style, Transform};
-
-use peniko::kurbo::{Shape, Stroke};
-use peniko::{BlendMode, BrushRef, Color, Fill};
-
-#[cfg(feature = "full")]
-use {
-    super::{
-        DrawImage, DrawLinearGradient, DrawRadialGradient, DrawSweepGradient, Glyph, GlyphRun,
-        Patch,
-    },
-    peniko::{ColorStop, Extend, GradientKind, Image},
-    skrifa::instance::NormalizedCoord,
+use super::{
+    DrawBlurRoundedRect, DrawColor, DrawImage, DrawLinearGradient, DrawRadialGradient,
+    DrawSweepGradient, DrawTag, Glyph, GlyphRun, NormalizedCoord, Patch, PathEncoder, PathTag,
+    Style, Transform,
 };
+
+use peniko::color::{palette, DynamicColor};
+use peniko::kurbo::{Shape, Stroke};
+use peniko::{BlendMode, BrushRef, ColorStop, Extend, Fill, GradientKind, Image};
 
 /// Encoded data streams for a scene.
 ///
@@ -37,7 +32,6 @@ pub struct Encoding {
     /// The style stream
     pub styles: Vec<Style>,
     /// Late bound resource data.
-    #[cfg(feature = "full")]
     pub resources: Resources,
     /// Number of encoded paths.
     pub n_paths: u32,
@@ -86,13 +80,11 @@ impl Encoding {
         self.n_clips = 0;
         self.n_open_clips = 0;
         self.flags = 0;
-        #[cfg(feature = "full")]
         self.resources.reset();
     }
 
     /// Appends another encoding to this one with an optional transform.
     pub fn append(&mut self, other: &Self, transform: &Option<Transform>) {
-        #[cfg(feature = "full")]
         let glyph_runs_base = {
             let offsets = self.stream_offsets();
             let stops_base = self.resources.color_stops.len();
@@ -163,7 +155,6 @@ impl Encoding {
         if let Some(transform) = *transform {
             self.transforms
                 .extend(other.transforms.iter().map(|x| transform * *x));
-            #[cfg(feature = "full")]
             for run in &mut self.resources.glyph_runs[glyph_runs_base..] {
                 run.transform = transform * run.transform;
             }
@@ -222,7 +213,7 @@ impl Encoding {
 
     /// Returns an encoder for encoding a path. If `is_fill` is true, all subpaths will
     /// be automatically closed.
-    pub fn encode_path(&mut self, is_fill: bool) -> PathEncoder {
+    pub fn encode_path(&mut self, is_fill: bool) -> PathEncoder<'_> {
         PathEncoder::new(
             &mut self.path_tags,
             &mut self.path_data,
@@ -264,8 +255,11 @@ impl Encoding {
     }
 
     /// Encodes a brush with an optional alpha modifier.
+    #[expect(
+        single_use_lifetimes,
+        reason = "False positive: https://github.com/rust-lang/rust/issues/129255"
+    )]
     pub fn encode_brush<'b>(&mut self, brush: impl Into<BrushRef<'b>>, alpha: f32) {
-        #[cfg(feature = "full")]
         use super::math::point_to_f32;
         match brush.into() {
             BrushRef::Solid(color) => {
@@ -274,9 +268,8 @@ impl Encoding {
                 } else {
                     color
                 };
-                self.encode_color(DrawColor::new(color));
+                self.encode_color(color);
             }
-            #[cfg(feature = "full")]
             BrushRef::Gradient(gradient) => match gradient.kind {
                 GradientKind::Linear { start, end } => {
                     self.encode_linear_gradient(
@@ -328,24 +321,20 @@ impl Encoding {
                     );
                 }
             },
-            #[cfg(feature = "full")]
             BrushRef::Image(image) => {
-                #[cfg(feature = "full")]
                 self.encode_image(image, alpha);
             }
-            #[cfg(not(feature = "full"))]
-            _ => panic!("brushes other than solid require the 'full' feature to be enabled"),
         }
     }
 
     /// Encodes a solid color brush.
-    pub fn encode_color(&mut self, color: DrawColor) {
+    pub fn encode_color(&mut self, color: impl Into<DrawColor>) {
+        let color = color.into();
         self.draw_tags.push(DrawTag::COLOR);
         self.draw_data.extend_from_slice(bytemuck::bytes_of(&color));
     }
 
     /// Encodes a linear gradient brush.
-    #[cfg(feature = "full")]
     pub fn encode_linear_gradient(
         &mut self,
         gradient: DrawLinearGradient,
@@ -354,9 +343,11 @@ impl Encoding {
         extend: Extend,
     ) {
         match self.add_ramp(color_stops, alpha, extend) {
-            RampStops::Empty => self.encode_color(DrawColor::new(Color::TRANSPARENT)),
-            RampStops::One(color) => self.encode_color(DrawColor::new(color)),
-            _ => {
+            RampStops::Empty => self.encode_color(palette::css::TRANSPARENT),
+            RampStops::One(color) => {
+                self.encode_color(color);
+            }
+            RampStops::Many => {
                 self.draw_tags.push(DrawTag::LINEAR_GRADIENT);
                 self.draw_data
                     .extend_from_slice(bytemuck::bytes_of(&gradient));
@@ -365,7 +356,6 @@ impl Encoding {
     }
 
     /// Encodes a radial gradient brush.
-    #[cfg(feature = "full")]
     pub fn encode_radial_gradient(
         &mut self,
         gradient: DrawRadialGradient,
@@ -376,13 +366,13 @@ impl Encoding {
         // Match Skia's epsilon for radii comparison
         const SKIA_EPSILON: f32 = 1.0 / (1 << 12) as f32;
         if gradient.p0 == gradient.p1 && (gradient.r0 - gradient.r1).abs() < SKIA_EPSILON {
-            self.encode_color(DrawColor::new(Color::TRANSPARENT));
+            self.encode_color(palette::css::TRANSPARENT);
             return;
         }
         match self.add_ramp(color_stops, alpha, extend) {
-            RampStops::Empty => self.encode_color(DrawColor::new(Color::TRANSPARENT)),
-            RampStops::One(color) => self.encode_color(DrawColor::new(color)),
-            _ => {
+            RampStops::Empty => self.encode_color(palette::css::TRANSPARENT),
+            RampStops::One(color) => self.encode_color(color),
+            RampStops::Many => {
                 self.draw_tags.push(DrawTag::RADIAL_GRADIENT);
                 self.draw_data
                     .extend_from_slice(bytemuck::bytes_of(&gradient));
@@ -391,7 +381,6 @@ impl Encoding {
     }
 
     /// Encodes a radial gradient brush.
-    #[cfg(feature = "full")]
     pub fn encode_sweep_gradient(
         &mut self,
         gradient: DrawSweepGradient,
@@ -401,13 +390,13 @@ impl Encoding {
     ) {
         const SKIA_DEGENERATE_THRESHOLD: f32 = 1.0 / (1 << 15) as f32;
         if (gradient.t0 - gradient.t1).abs() < SKIA_DEGENERATE_THRESHOLD {
-            self.encode_color(DrawColor::new(Color::TRANSPARENT));
+            self.encode_color(palette::css::TRANSPARENT);
             return;
         }
         match self.add_ramp(color_stops, alpha, extend) {
-            RampStops::Empty => self.encode_color(DrawColor::new(Color::TRANSPARENT)),
-            RampStops::One(color) => self.encode_color(DrawColor::new(color)),
-            _ => {
+            RampStops::Empty => self.encode_color(palette::css::TRANSPARENT),
+            RampStops::One(color) => self.encode_color(color),
+            RampStops::Many => {
                 self.draw_tags.push(DrawTag::SWEEP_GRADIENT);
                 self.draw_data
                     .extend_from_slice(bytemuck::bytes_of(&gradient));
@@ -416,9 +405,8 @@ impl Encoding {
     }
 
     /// Encodes an image brush.
-    #[cfg(feature = "full")]
     pub fn encode_image(&mut self, image: &Image, alpha: f32) {
-        let _alpha = alpha * f32::from(image.alpha);
+        let alpha = (alpha * image.alpha * 255.0).round() as u8;
         // TODO: feed the alpha multiplier through the full pipeline for consistency
         // with other brushes?
         // Tracked in https://github.com/linebender/vello/issues/692
@@ -431,13 +419,17 @@ impl Encoding {
             .extend_from_slice(bytemuck::bytes_of(&DrawImage {
                 xy: 0,
                 width_height: (image.width << 16) | (image.height & 0xFFFF),
+                sample_alpha: ((image.quality as u32) << 12)
+                    | ((image.x_extend as u32) << 10)
+                    | ((image.y_extend as u32) << 8)
+                    | alpha as u32,
             }));
     }
 
     // Encodes a blurred rounded rectangle brush.
     pub fn encode_blurred_rounded_rect(
         &mut self,
-        color: Color,
+        color: impl Into<DrawColor>,
         width: f32,
         height: f32,
         radius: f32,
@@ -446,7 +438,7 @@ impl Encoding {
         self.draw_tags.push(DrawTag::BLUR_RECT);
         self.draw_data
             .extend_from_slice(bytemuck::bytes_of(&DrawBlurRoundedRect {
-                color: DrawColor::new(color),
+                color: color.into(),
                 width,
                 height,
                 radius,
@@ -489,7 +481,6 @@ impl Encoding {
         self.path_tags.swap(len - 1, len - 2);
     }
 
-    #[cfg(feature = "full")]
     fn add_ramp(
         &mut self,
         color_stops: impl Iterator<Item = ColorStop>,
@@ -521,19 +512,17 @@ impl Encoding {
     }
 }
 
-#[cfg(feature = "full")]
 /// Result for adding a sequence of color stops.
 enum RampStops {
     /// Color stop sequence was empty.
     Empty,
     /// Contained a single color stop.
-    One(Color),
+    One(DynamicColor),
     /// More than one color stop.
     Many,
 }
 
 /// Encoded data for late bound resources.
-#[cfg(feature = "full")]
 #[derive(Clone, Default)]
 pub struct Resources {
     /// Draw data patches for late bound resources.
@@ -548,7 +537,6 @@ pub struct Resources {
     pub normalized_coords: Vec<NormalizedCoord>,
 }
 
-#[cfg(feature = "full")]
 impl Resources {
     #[doc(alias = "clear")]
     // This is not called "clear" because "clear" has other implications
@@ -580,7 +568,6 @@ pub struct StreamOffsets {
 }
 
 impl StreamOffsets {
-    #[cfg(feature = "full")]
     pub(crate) fn add(&mut self, other: &Self) {
         self.path_tags += other.path_tags;
         self.path_data += other.path_data;
@@ -588,5 +575,32 @@ impl StreamOffsets {
         self.draw_data += other.draw_data;
         self.transforms += other.transforms;
         self.styles += other.styles;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use peniko::{Extend, ImageQuality};
+
+    #[test]
+    fn ensure_image_quality_values() {
+        assert_eq!(ImageQuality::Low as u32, 0);
+        assert_eq!(ImageQuality::Medium as u32, 1);
+        assert_eq!(ImageQuality::High as u32, 2);
+        // exhaustive match to catch new variants
+        match ImageQuality::Low {
+            ImageQuality::Low | ImageQuality::Medium | ImageQuality::High => {}
+        }
+    }
+
+    #[test]
+    fn ensure_extend_values() {
+        assert_eq!(Extend::Pad as u32, 0);
+        assert_eq!(Extend::Repeat as u32, 1);
+        assert_eq!(Extend::Reflect as u32, 2);
+        // exhaustive match to catch new variants
+        match Extend::Pad {
+            Extend::Pad | Extend::Repeat | Extend::Reflect => {}
+        }
     }
 }

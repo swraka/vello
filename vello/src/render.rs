@@ -3,8 +3,6 @@
 
 //! Take an encoded scene and create a graph to render it
 
-use std::mem::size_of;
-
 use crate::recording::{BufferProxy, ImageFormat, ImageProxy, Recording, ResourceProxy};
 use crate::shaders::FullShaders;
 use crate::{AaConfig, RenderParams};
@@ -111,7 +109,7 @@ impl Default for Render {
 
 impl Render {
     pub fn new() -> Self {
-        Render {
+        Self {
             fine_wg_count: None,
             fine_resources: None,
             mask_buf: None,

@@ -11,7 +11,7 @@
 
 use std::cmp::Ordering;
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use rand::Rng;
 use vello::kurbo::{Affine, BezPath, CubicBez, Line, ParamCurve, PathSeg, Point, QuadBez, Stroke};
 use vello::peniko::Color;
@@ -41,8 +41,8 @@ struct Element {
 struct GridPoint(i64, i64);
 
 impl MMark {
-    pub fn new(n: usize) -> MMark {
-        let mut result = MMark { elements: vec![] };
+    pub fn new(n: usize) -> Self {
+        let mut result = Self { elements: vec![] };
         result.resize(n);
         result
     }
@@ -69,7 +69,7 @@ impl MMark {
 }
 
 impl TestScene for MMark {
-    fn render(&mut self, scene: &mut Scene, params: &mut SceneParams) {
+    fn render(&mut self, scene: &mut Scene, params: &mut SceneParams<'_>) {
         let c = params.complexity;
         let n = if c < 10 {
             (c + 1) * 1000
@@ -77,7 +77,7 @@ impl TestScene for MMark {
             ((c - 8) * 10000).min(120_000)
         };
         self.resize(n);
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut path = BezPath::new();
         let len = self.elements.len();
         for (i, element) in self.elements.iter_mut().enumerate() {
@@ -101,7 +101,7 @@ impl TestScene for MMark {
                 );
                 path.truncate(0); // Should have clear method, to avoid allocations.
             }
-            if rng.gen::<f32>() > 0.995 {
+            if rng.random::<f32>() > 0.995 {
                 element.is_split ^= true;
             }
         }
@@ -118,19 +118,19 @@ impl TestScene for MMark {
 }
 
 const COLORS: &[Color] = &[
-    Color::rgb8(0x10, 0x10, 0x10),
-    Color::rgb8(0x80, 0x80, 0x80),
-    Color::rgb8(0xc0, 0xc0, 0xc0),
-    Color::rgb8(0x10, 0x10, 0x10),
-    Color::rgb8(0x80, 0x80, 0x80),
-    Color::rgb8(0xc0, 0xc0, 0xc0),
-    Color::rgb8(0xe0, 0x10, 0x40),
+    Color::from_rgb8(0x10, 0x10, 0x10),
+    Color::from_rgb8(0x80, 0x80, 0x80),
+    Color::from_rgb8(0xc0, 0xc0, 0xc0),
+    Color::from_rgb8(0x10, 0x10, 0x10),
+    Color::from_rgb8(0x80, 0x80, 0x80),
+    Color::from_rgb8(0xc0, 0xc0, 0xc0),
+    Color::from_rgb8(0xe0, 0x10, 0x40),
 ];
 
 impl Element {
-    fn new_rand(last: GridPoint) -> Element {
-        let mut rng = rand::thread_rng();
-        let seg_type = rng.gen_range(0..4);
+    fn new_rand(last: GridPoint) -> Self {
+        let mut rng = rand::rng();
+        let seg_type = rng.random_range(0..4);
         let next = GridPoint::random_point(last);
         let (grid_point, seg) = if seg_type < 2 {
             (
@@ -161,9 +161,9 @@ impl Element {
             )
         };
         let color = *COLORS.choose(&mut rng).unwrap();
-        let width = rng.gen::<f64>().powi(5) * 20.0 + 1.0;
-        let is_split = rng.gen();
-        Element {
+        let width = rng.random::<f64>().powi(5) * 20.0 + 1.0;
+        let is_split = rng.random();
+        Self {
             seg,
             color,
             width,
@@ -176,8 +176,8 @@ impl Element {
 const OFFSETS: &[(i64, i64)] = &[(-4, 0), (2, 0), (1, -2), (1, 2)];
 
 impl GridPoint {
-    fn random_point(last: GridPoint) -> GridPoint {
-        let mut rng = rand::thread_rng();
+    fn random_point(last: Self) -> Self {
+        let mut rng = rand::rng();
 
         let offset = OFFSETS.choose(&mut rng).unwrap();
         let mut x = last.0 + offset.0;
@@ -188,10 +188,10 @@ impl GridPoint {
         if !(0..=GRID_HEIGHT).contains(&y) {
             y -= offset.1 * 2;
         }
-        GridPoint(x, y)
+        Self(x, y)
     }
 
-    fn coordinate(&self) -> Point {
+    fn coordinate(self) -> Point {
         let scale_x = WIDTH as f64 / ((GRID_WIDTH + 1) as f64);
         let scale_y = HEIGHT as f64 / ((GRID_HEIGHT + 1) as f64);
         Point::new(

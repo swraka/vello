@@ -524,7 +524,7 @@ struct IntBbox {
 
 impl Default for IntBbox {
     fn default() -> Self {
-        IntBbox {
+        Self {
             x0: 0x7fff_ffff,
             y0: 0x7fff_ffff,
             x1: -0x8000_0000,
@@ -560,9 +560,7 @@ fn compute_tag_monoid(ix: usize, pathtags: &[u32], tag_monoids: &[PathMonoid]) -
     // We wrap here because these values will return to positive values later
     // (when we add style_base)
     tm.trans_ix = tm.trans_ix.wrapping_sub(1);
-    tm.style_ix = tm
-        .style_ix
-        .wrapping_sub(core::mem::size_of::<Style>() as u32 / 4);
+    tm.style_ix = tm.style_ix.wrapping_sub(size_of::<Style>() as u32 / 4);
     PathTagData {
         tag_byte,
         monoid: tm,
@@ -843,7 +841,7 @@ fn flatten_main(
     bump.lines = line_ix as u32;
 }
 
-pub fn flatten(n_wg: u32, resources: &[CpuBinding]) {
+pub fn flatten(n_wg: u32, resources: &[CpuBinding<'_>]) {
     let config = resources[0].as_typed();
     let scene = resources[1].as_slice();
     let tag_monoids = resources[2].as_slice();

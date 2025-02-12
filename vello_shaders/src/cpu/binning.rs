@@ -36,10 +36,8 @@ fn binning_main(
     for wg in 0..n_wg as usize {
         let mut counts = [0; WG_SIZE];
         let mut bboxes = [[0, 0, 0, 0]; WG_SIZE];
-        let width_in_bins =
-            ((config.width_in_tiles + N_TILE_X as u32 - 1) / N_TILE_X as u32) as i32;
-        let height_in_bins =
-            ((config.height_in_tiles + N_TILE_Y as u32 - 1) / N_TILE_Y as u32) as i32;
+        let width_in_bins = config.width_in_tiles.div_ceil(N_TILE_X as u32) as i32;
+        let height_in_bins = config.height_in_tiles.div_ceil(N_TILE_Y as u32) as i32;
         for local_ix in 0..WG_SIZE {
             let element_ix = wg * WG_SIZE + local_ix;
             let mut x0 = 0;
@@ -105,7 +103,7 @@ fn binning_main(
     }
 }
 
-pub fn binning(n_wg: u32, resources: &[CpuBinding]) {
+pub fn binning(n_wg: u32, resources: &[CpuBinding<'_>]) {
     let config = resources[0].as_typed();
     let draw_monoids = resources[1].as_slice();
     let path_bbox_buf = resources[2].as_slice();

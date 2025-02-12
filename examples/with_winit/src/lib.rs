@@ -1,8 +1,17 @@
 // Copyright 2022 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-// This is not a published crate, so we don't need to understand our public API
-#![allow(unreachable_pub)]
+//! Winit example.
+
+// The following lints are part of the Linebender standard set,
+// but resolving them has been deferred for now.
+// Feel free to send a PR that solves one or more of these.
+#![allow(
+    unreachable_pub,
+    clippy::allow_attributes_without_reason,
+    clippy::cast_possible_truncation,
+    clippy::shadow_unrelated
+)]
 
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
@@ -14,8 +23,8 @@ use vello::low_level::DebugLayers;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 use winit::application::ApplicationHandler;
-use winit::event::*;
-use winit::keyboard::*;
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 
 #[cfg(all(feature = "wgpu-profiler", not(target_arch = "wasm32")))]
 use std::time::Duration;
@@ -25,7 +34,7 @@ use web_time::Duration;
 use clap::Parser;
 use scenes::{ExampleScene, ImageCache, SceneParams, SceneSet, SimpleText};
 use vello::kurbo::{Affine, Vec2};
-use vello::peniko::Color;
+use vello::peniko::{color::palette, Color};
 use vello::util::{RenderContext, RenderSurface};
 use vello::{low_level::BumpAllocators, AaConfig, Renderer, RendererOptions, Scene};
 
@@ -129,8 +138,6 @@ struct VelloApp<'s> {
     base_color: Option<Color>,
     async_pipeline: bool,
 
-    // Currently not updated in wasm builds
-    #[allow(unused_mut)]
     scene_complexity: Option<BumpAllocators>,
 
     complexity_shown: bool,
@@ -166,13 +173,13 @@ struct VelloApp<'s> {
     debug: DebugLayers,
 }
 
-impl<'s> ApplicationHandler<UserEvent> for VelloApp<'s> {
+impl ApplicationHandler<UserEvent> for VelloApp<'_> {
     #[cfg(target_arch = "wasm32")]
     fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
 
     #[cfg(not(target_arch = "wasm32"))]
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let Option::None = self.state else {
+        let None = self.state else {
             return;
         };
         let window = self
@@ -197,11 +204,9 @@ impl<'s> ApplicationHandler<UserEvent> for VelloApp<'s> {
             let id = render_state.surface.dev_id;
             self.renderers[id].get_or_insert_with(|| {
                 let start = Instant::now();
-                #[allow(unused_mut)]
-                let mut renderer = Renderer::new(
+                let renderer = Renderer::new(
                     &self.context.devices[id].device,
                     RendererOptions {
-                        surface_format: Some(render_state.surface.format),
                         use_cpu: self.use_cpu,
                         antialiasing_support: AA_CONFIGS.iter().copied().collect(),
                         num_init_threads: NonZeroUsize::new(self.num_init_threads),
@@ -213,6 +218,8 @@ impl<'s> ApplicationHandler<UserEvent> for VelloApp<'s> {
                 })
                 .expect("Failed to create renderer");
                 log::info!("Creating renderer {id} took {:?}", start.elapsed());
+                #[cfg(feature = "wgpu-profiler")]
+                let mut renderer = renderer;
                 #[cfg(feature = "wgpu-profiler")]
                 renderer
                     .profiler
@@ -232,7 +239,7 @@ impl<'s> ApplicationHandler<UserEvent> for VelloApp<'s> {
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
         window_id: winit::window::WindowId,
-        event: winit::event::WindowEvent,
+        event: WindowEvent,
     ) {
         let Some(render_state) = &mut self.state else {
             return;
@@ -398,7 +405,7 @@ impl<'s> ApplicationHandler<UserEvent> for VelloApp<'s> {
                     self.context
                         .resize_surface(surface, size.width, size.height);
                     window.request_redraw();
-                };
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left {
@@ -480,7 +487,7 @@ impl<'s> ApplicationHandler<UserEvent> for VelloApp<'s> {
                 let base_color = self
                     .base_color
                     .or(scene_params.base_color)
-                    .unwrap_or(Color::BLACK);
+                    .unwrap_or(palette::css::BLACK);
                 let antialiasing_method = AA_CONFIGS[self.aa_config_ix as usize];
                 let render_params = vello::RenderParams {
                     base_color,
@@ -535,53 +542,72 @@ impl<'s> ApplicationHandler<UserEvent> for VelloApp<'s> {
                     }
                 }
                 drop(encoding_span);
-                let texture_span = tracing::trace_span!("Getting texture").entered();
-                let surface_texture = surface
-                    .surface
-                    .get_current_texture()
-                    .expect("failed to get surface texture");
-
-                drop(texture_span);
                 let render_span = tracing::trace_span!("Dispatching render").entered();
-                // Note: we don't run the async/"robust" pipeline, as
+                // Note: we don't run the async/"robust" pipeline on web, as
                 // it requires more async wiring for the readback. See
                 // [#gpu > async on wasm](https://xi.zulipchat.com/#narrow/stream/197075-gpu/topic/async.20on.20wasm)
-                #[allow(deprecated)]
-                // #[expect(deprecated, reason = "This deprecation is not targeted at us.")] // Our MSRV is too low to use `expect`
+                #[expect(
+                    deprecated,
+                    reason = "We still want to use the async pipeline for the debug layers"
+                )]
                 if self.async_pipeline && cfg!(not(target_arch = "wasm32")) {
                     self.scene_complexity = vello::util::block_on_wgpu(
                         &device_handle.device,
                         self.renderers[surface.dev_id]
                             .as_mut()
                             .unwrap()
-                            .render_to_surface_async(
+                            .render_to_texture_async(
                                 &device_handle.device,
                                 &device_handle.queue,
                                 &self.scene,
-                                &surface_texture,
+                                &surface.target_view,
                                 &render_params,
                                 self.debug,
                             ),
                     )
-                    .expect("failed to render to surface");
+                    .expect("failed to render to texture");
                 } else {
                     self.renderers[surface.dev_id]
                         .as_mut()
                         .unwrap()
-                        .render_to_surface(
+                        .render_to_texture(
                             &device_handle.device,
                             &device_handle.queue,
                             &self.scene,
-                            &surface_texture,
+                            &surface.target_view,
                             &render_params,
                         )
-                        .expect("failed to render to surface");
+                        .expect("failed to render to texture");
                 }
-                surface_texture.present();
                 drop(render_span);
 
+                let texture_span = tracing::trace_span!("Blitting to surface").entered();
+                let surface_texture = surface
+                    .surface
+                    .get_current_texture()
+                    .expect("failed to get surface texture");
+                // Perform the copy
+                // (TODO: Does it improve throughput to acquire the surface after the previous texture render has happened?)
+                let mut encoder =
+                    device_handle
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Surface Blit"),
+                        });
+                surface.blitter.copy(
+                    &device_handle.device,
+                    &mut encoder,
+                    &surface.target_view,
+                    &surface_texture
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default()),
+                );
+                device_handle.queue.submit([encoder.finish()]);
+                surface_texture.present();
+                drop(texture_span);
+
                 {
-                    let _poll_aspan = tracing::trace_span!("Polling wgpu device").entered();
+                    let _poll_span = tracing::trace_span!("Polling wgpu device").entered();
                     device_handle.device.poll(wgpu::Maintain::Poll);
                 }
                 let new_time = Instant::now();
@@ -650,29 +676,25 @@ fn run(
     args: Args,
     scenes: SceneSet,
     render_cx: RenderContext,
-    #[cfg(target_arch = "wasm32")] render_state: RenderState,
+    #[cfg(target_arch = "wasm32")] render_state: RenderState<'_>,
 ) {
-    use winit::keyboard::*;
-
-    #[allow(unused_mut)]
-    let mut renderers: Vec<Option<Renderer>> = vec![];
+    use winit::keyboard::ModifiersState;
 
     #[cfg(not(target_arch = "wasm32"))]
-    let render_state = None::<RenderState>;
+    let (render_state, renderers) = (None::<RenderState<'_>>, vec![]);
 
     // The design of `RenderContext` forces delayed renderer initialisation to
     // not work on wasm, as WASM futures effectively must be 'static.
     // Otherwise, this could work by sending the result to event_loop.proxy
     // instead of blocking
     #[cfg(target_arch = "wasm32")]
-    let render_state = {
+    let (render_state, renderers) = {
+        let mut renderers = vec![];
         renderers.resize_with(render_cx.devices.len(), || None);
         let id = render_state.surface.dev_id;
-        #[allow(unused_mut)]
-        let mut renderer = Renderer::new(
+        let renderer = Renderer::new(
             &render_cx.devices[id].device,
             RendererOptions {
-                surface_format: Some(render_state.surface.format),
                 use_cpu: args.use_cpu,
                 antialiasing_support: AA_CONFIGS.iter().copied().collect(),
                 // We currently initialise on one thread on WASM, but mark this here
@@ -687,6 +709,8 @@ fn run(
         })
         .expect("Failed to create renderer");
         #[cfg(feature = "wgpu-profiler")]
+        let mut renderer = renderer;
+        #[cfg(feature = "wgpu-profiler")]
         renderer
             .profiler
             .change_settings(wgpu_profiler::GpuProfilerSettings {
@@ -696,7 +720,7 @@ fn run(
             })
             .expect("Not setting max_num_pending_frames");
         renderers[id] = Some(renderer);
-        Some(render_state)
+        (Some(render_state), renderers)
     };
 
     let debug = DebugLayers::none();
@@ -807,6 +831,7 @@ fn display_error_message() -> Option<()> {
     Some(())
 }
 
+/// Entry point.
 #[cfg(not(target_os = "android"))]
 pub fn main() -> anyhow::Result<()> {
     // TODO: initializing both env_logger and console_logger fails on wasm.
@@ -820,8 +845,7 @@ pub fn main() -> anyhow::Result<()> {
     let scenes = args.args.select_scene_set()?;
     if let Some(scenes) = scenes {
         let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
-        #[allow(unused_mut)]
-        let mut render_cx = RenderContext::new();
+        let render_cx = RenderContext::new();
         #[cfg(not(target_arch = "wasm32"))]
         {
             let proxy = event_loop.create_proxy();
@@ -833,6 +857,7 @@ pub fn main() -> anyhow::Result<()> {
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let mut render_cx = render_cx;
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
             console_log::init().expect("could not initialize logger");
             use winit::platform::web::WindowExtWebSys;
@@ -846,7 +871,7 @@ pub fn main() -> anyhow::Result<()> {
                 .and_then(|body| body.append_child(canvas.as_ref()).ok())
                 .expect("couldn't append canvas to document body");
             // Best effort to start with the canvas focused, taking input
-            _ = web_sys::HtmlElement::from(canvas).focus();
+            drop(web_sys::HtmlElement::from(canvas).focus());
             wasm_bindgen_futures::spawn_local(async move {
                 let (width, height, scale_factor) = web_sys::window()
                     .map(|w| {
@@ -952,5 +977,6 @@ fn android_main(app: AndroidApp) {
 // aligns to the same version that vello's peniko dependency resolves to.
 fn test_kurbo_schemars_with_peniko() {
     use std::marker::PhantomData;
+    #[expect(unused_qualifications)]
     let _: PhantomData<kurbo::Rect> = PhantomData::<vello::peniko::kurbo::Rect>;
 }

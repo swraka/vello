@@ -21,7 +21,7 @@ pub fn get_imports(shader_dir: &Path) -> HashMap<String, String> {
             let suffix = ".wgsl";
             if let Some(import_name) = name.strip_suffix(suffix) {
                 let contents = fs::read_to_string(imports_dir.join(&file_name))
-                    .expect("Could read shader {import_name} contents");
+                    .unwrap_or_else(|_| panic!("Couldn't read shader {import_name} contents"));
                 imports.insert(import_name.to_owned(), contents);
             }
         }
@@ -169,15 +169,7 @@ pub fn preprocess(
             }
         }
         if stack.iter().all(|item| item.active) {
-            // Naga does not yet recognize `const` but web does not allow global `let`. We
-            // use `let` in our canonical sources to satisfy wgsl-analyzer but replace with
-            // `const` when targeting web.
-            if line.starts_with("let ") {
-                output.push_str("const");
-                output.push_str(&line[3..]);
-            } else {
-                output.push_str(line);
-            }
+            output.push_str(line);
             output.push('\n');
         }
     }

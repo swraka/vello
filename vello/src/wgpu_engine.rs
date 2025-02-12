@@ -5,13 +5,10 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-
-use vello_shaders::cpu::CpuBinding;
 
 use wgpu::{
     BindGroup, BindGroupLayout, Buffer, BufferUsages, CommandEncoder, CommandEncoderDescriptor,
-    ComputePipeline, Device, PipelineCompilationOptions, Queue, RenderPipeline, Texture,
+    ComputePassDescriptor, ComputePipeline, Device, PipelineCompilationOptions, Queue, Texture,
     TextureAspect, TextureUsages, TextureView, TextureViewDimension,
 };
 
@@ -20,6 +17,7 @@ use crate::{
     recording::BindType,
     Error, Result,
 };
+use vello_shaders::cpu::CpuBinding;
 
 #[cfg(not(target_arch = "wasm32"))]
 struct UninitialisedShader {
@@ -41,12 +39,13 @@ pub(crate) struct WgpuEngine {
     /// Overrides from a specific `Image::data`'s [`id`](peniko::Blob::id) to a wgpu `Texture`.
     ///
     /// The `Texture` should have the same size as the `Image`.
-    pub(crate) image_overrides: HashMap<u64, wgpu::ImageCopyTextureBase<Arc<Texture>>>,
+    pub(crate) image_overrides: HashMap<u64, wgpu::TexelCopyTextureInfoBase<Texture>>,
 }
 
 enum PipelineState {
     Compute(ComputePipeline),
-    Render(RenderPipeline),
+    #[cfg(feature = "debug_layers")]
+    Render(wgpu::RenderPipeline),
 }
 
 struct WgpuShader {
@@ -55,13 +54,13 @@ struct WgpuShader {
 }
 
 pub(crate) enum CpuShaderType {
-    Present(fn(u32, &[CpuBinding])),
+    Present(fn(u32, &[CpuBinding<'_>])),
     Missing,
     Skipped,
 }
 
 struct CpuShader {
-    shader: fn(u32, &[CpuBinding]),
+    shader: fn(u32, &[CpuBinding<'_>]),
 }
 
 enum ShaderKind<'a> {
@@ -70,14 +69,13 @@ enum ShaderKind<'a> {
 }
 
 struct Shader {
-    #[allow(dead_code)]
     label: &'static str,
     wgpu: Option<WgpuShader>,
     cpu: Option<CpuShader>,
 }
 
 impl Shader {
-    fn select(&self) -> ShaderKind {
+    fn select(&self) -> ShaderKind<'_> {
         if let Some(cpu) = self.cpu.as_ref() {
             ShaderKind::Cpu(cpu)
         } else if let Some(wgpu) = self.wgpu.as_ref() {
@@ -89,7 +87,7 @@ impl Shader {
 }
 
 pub(crate) enum ExternalResource<'a> {
-    #[allow(unused)]
+    #[expect(unused, reason = "No buffers are accepted as arguments currently")]
     Buffer(BufferProxy, &'a Buffer),
     Image(ImageProxy, &'a TextureView),
 }
@@ -102,7 +100,6 @@ enum MaterializedBuffer {
 
 struct BindMapBuffer {
     buffer: MaterializedBuffer,
-    #[cfg_attr(not(feature = "buffer_labels"), allow(unused))]
     label: &'static str,
 }
 
@@ -117,7 +114,6 @@ struct BindMap {
 struct BufferProperties {
     size: u64,
     usages: BufferUsages,
-    #[cfg(feature = "buffer_labels")]
     name: &'static str,
 }
 
@@ -144,7 +140,7 @@ enum TransientBuf<'a> {
 }
 
 impl WgpuEngine {
-    pub fn new(use_cpu: bool) -> WgpuEngine {
+    pub fn new(use_cpu: bool) -> Self {
         Self {
             use_cpu,
             ..Default::default()
@@ -303,7 +299,7 @@ impl WgpuEngine {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "debug_layers")]
     pub fn add_render_shader(
         &mut self,
         device: &Device,
@@ -313,7 +309,7 @@ impl WgpuEngine {
         fragment_main: &'static str,
         topology: wgpu::PrimitiveTopology,
         color_attachment: wgpu::ColorTargetState,
-        vertex_buffer: Option<wgpu::VertexBufferLayout>,
+        vertex_buffer: Option<wgpu::VertexBufferLayout<'_>>,
         bind_layout: &[(BindType, wgpu::ShaderStages)],
     ) -> ShaderId {
         let entries = Self::create_bind_group_layout_entries(bind_layout.iter().copied());
@@ -331,16 +327,13 @@ impl WgpuEngine {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module,
-                entry_point: vertex_main,
-                buffers: vertex_buffer
-                    .as_ref()
-                    .map(core::slice::from_ref)
-                    .unwrap_or_default(),
+                entry_point: Some(vertex_main),
+                buffers: vertex_buffer.as_slice(),
                 compilation_options: PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module,
-                entry_point: fragment_main,
+                entry_point: Some(fragment_main),
                 targets: &[Some(color_attachment)],
                 compilation_options: PipelineCompilationOptions::default(),
             }),
@@ -375,12 +368,12 @@ impl WgpuEngine {
         device: &Device,
         queue: &Queue,
         recording: &Recording,
-        external_resources: &[ExternalResource],
+        external_resources: &[ExternalResource<'_>],
         label: &'static str,
         #[cfg(feature = "wgpu-profiler")] profiler: &mut wgpu_profiler::GpuProfiler,
     ) -> Result<()> {
-        let mut free_bufs: HashSet<ResourceId> = Default::default();
-        let mut free_images: HashSet<ResourceId> = Default::default();
+        let mut free_bufs: HashSet<ResourceId> = HashSet::default();
+        let mut free_images: HashSet<ResourceId> = HashSet::default();
         let mut transient_map = TransientBindMap::new(external_resources);
 
         let mut encoder =
@@ -440,6 +433,7 @@ impl WgpuEngine {
                     let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
                         label: None,
                         dimension: Some(TextureViewDimension::D2),
+                        usage: None,
                         aspect: TextureAspect::All,
                         mip_level_count: None,
                         base_mip_level: 0,
@@ -448,14 +442,14 @@ impl WgpuEngine {
                         format: Some(format),
                     });
                     queue.write_texture(
-                        wgpu::ImageCopyTexture {
+                        wgpu::TexelCopyTextureInfo {
                             texture: &texture,
                             mip_level: 0,
                             origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                             aspect: TextureAspect::All,
                         },
                         bytes,
-                        wgpu::ImageDataLayout {
+                        wgpu::TexelCopyBufferLayout {
                             offset: 0,
                             bytes_per_row: Some(image_proxy.width * block_size),
                             rows_per_image: None,
@@ -477,13 +471,13 @@ impl WgpuEngine {
                         .expect("ImageFormat must have a valid block size");
                     if let Some(overrider) = self.image_overrides.get(&image.data.id()) {
                         encoder.copy_texture_to_texture(
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &overrider.texture,
                                 mip_level: overrider.mip_level,
                                 origin: overrider.origin,
                                 aspect: overrider.aspect,
                             },
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture,
                                 mip_level: 0,
                                 origin: wgpu::Origin3d { x: *x, y: *y, z: 0 },
@@ -497,14 +491,14 @@ impl WgpuEngine {
                         );
                     } else {
                         queue.write_texture(
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture,
                                 mip_level: 0,
                                 origin: wgpu::Origin3d { x: *x, y: *y, z: 0 },
                                 aspect: TextureAspect::All,
                             },
                             image.data.data(),
-                            wgpu::ImageDataLayout {
+                            wgpu::TexelCopyBufferLayout {
                                 offset: 0,
                                 bytes_per_row: Some(image.width * block_size),
                                 rows_per_image: None,
@@ -549,12 +543,21 @@ impl WgpuEngine {
                                 &wgpu_shader.bind_group_layout,
                                 bindings,
                             );
-                            let mut cpass = encoder.begin_compute_pass(&Default::default());
+                            let mut cpass =
+                                encoder.begin_compute_pass(&ComputePassDescriptor::default());
                             #[cfg(feature = "wgpu-profiler")]
                             let query = profiler
                                 .begin_query(shader.label, &mut cpass, device)
                                 .with_parent(Some(&query));
-                            let PipelineState::Compute(pipeline) = &wgpu_shader.pipeline else {
+                            #[cfg_attr(
+                                not(feature = "debug_layers"),
+                                expect(
+                                    irrefutable_let_patterns,
+                                    reason = "Render shaders are only enabled if we have the debug pipeline"
+                                )
+                            )]
+                            let PipelineState::Compute(pipeline) = &wgpu_shader.pipeline
+                            else {
                                 panic!("cannot issue a dispatch with a render pipeline");
                             };
                             cpass.set_pipeline(pipeline);
@@ -599,12 +602,21 @@ impl WgpuEngine {
                                 queue,
                                 proxy,
                             );
-                            let mut cpass = encoder.begin_compute_pass(&Default::default());
+                            let mut cpass =
+                                encoder.begin_compute_pass(&ComputePassDescriptor::default());
                             #[cfg(feature = "wgpu-profiler")]
                             let query = profiler
                                 .begin_query(shader.label, &mut cpass, device)
                                 .with_parent(Some(&query));
-                            let PipelineState::Compute(pipeline) = &wgpu_shader.pipeline else {
+                            #[cfg_attr(
+                                not(feature = "debug_layers"),
+                                expect(
+                                    irrefutable_let_patterns,
+                                    reason = "Render shaders are only enabled if we have the debug pipeline"
+                                )
+                            )]
+                            let PipelineState::Compute(pipeline) = &wgpu_shader.pipeline
+                            else {
                                 panic!("cannot issue a dispatch with a render pipeline");
                             };
                             cpass.set_pipeline(pipeline);
@@ -618,6 +630,7 @@ impl WgpuEngine {
                         }
                     }
                 }
+                #[cfg(feature = "debug_layers")]
                 Command::Draw(draw_params) => {
                     let shader = &self.shaders[draw_params.shader_id.0];
                     #[cfg(feature = "wgpu-profiler")]
@@ -726,7 +739,6 @@ impl WgpuEngine {
                     let props = BufferProperties {
                         size: gpu_buf.size(),
                         usages: gpu_buf.usage(),
-                        #[cfg(feature = "buffer_labels")]
                         name: buf.label,
                     };
                     self.pool.bufs.entry(props).or_default().push(gpu_buf);
@@ -786,14 +798,14 @@ impl WgpuEngine {
                         ty: if bind_type == BindType::ImageRead(format) {
                             wgpu::BindingType::Texture {
                                 sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
+                                view_dimension: TextureViewDimension::D2,
                                 multisampled: false,
                             }
                         } else {
                             wgpu::BindingType::StorageTexture {
                                 access: wgpu::StorageTextureAccess::WriteOnly,
                                 format: format.to_wgpu(),
-                                view_dimension: wgpu::TextureViewDimension::D2,
+                                view_dimension: TextureViewDimension::D2,
                             }
                         },
                         count: None,
@@ -827,7 +839,7 @@ impl WgpuEngine {
             label: Some(label),
             layout: Some(&compute_pipeline_layout),
             module: &shader_module,
-            entry_point: "main",
+            entry_point: None,
             compilation_options: PipelineCompilationOptions {
                 zero_initialize_workgroup_memory: false,
                 ..Default::default()
@@ -864,7 +876,7 @@ impl BindMap {
     /// Get a CPU buffer.
     ///
     /// Panics if buffer is not present or is on GPU.
-    fn get_cpu_buf(&self, id: ResourceId) -> CpuBinding {
+    fn get_cpu_buf(&self, id: ResourceId) -> CpuBinding<'_> {
         match &self.buf_map[&id].buffer {
             MaterializedBuffer::Cpu(b) => CpuBinding::BufferRW(b),
             _ => panic!("getting cpu buffer, but it's on gpu"),
@@ -915,6 +927,7 @@ impl BindMap {
                 });
                 let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
                     label: None,
+                    usage: None,
                     dimension: Some(TextureViewDimension::D2),
                     aspect: TextureAspect::All,
                     mip_level_count: None,
@@ -936,7 +949,7 @@ impl ResourcePool {
     fn get_buf(
         &mut self,
         size: u64,
-        #[allow(unused)] name: &'static str,
+        name: &'static str,
         usage: BufferUsages,
         device: &Device,
     ) -> Buffer {
@@ -944,7 +957,6 @@ impl ResourcePool {
         let props = BufferProperties {
             size: rounded_size,
             usages: usage,
-            #[cfg(feature = "buffer_labels")]
             name,
         };
         if let Some(buf_vec) = self.bufs.get_mut(&props) {
@@ -953,10 +965,7 @@ impl ResourcePool {
             }
         }
         device.create_buffer(&wgpu::BufferDescriptor {
-            #[cfg(feature = "buffer_labels")]
             label: Some(name),
-            #[cfg(not(feature = "buffer_labels"))]
-            label: None,
             size: rounded_size,
             usage,
             mapped_at_creation: false,
@@ -1002,7 +1011,7 @@ impl BindMapBuffer {
 
 impl<'a> TransientBindMap<'a> {
     /// Create new transient bind map, seeded from external resources
-    fn new(external_resources: &'a [ExternalResource]) -> Self {
+    fn new(external_resources: &'a [ExternalResource<'_>]) -> Self {
         let mut bufs = HashMap::default();
         let mut images = HashMap::default();
         for resource in external_resources {
@@ -1033,6 +1042,7 @@ impl<'a> TransientBindMap<'a> {
         }
     }
 
+    #[cfg(feature = "debug_layers")]
     fn materialize_external_image_for_render_pass(&mut self, proxy: &ImageProxy) -> &TextureView {
         // TODO: Maybe this should support instantiating a transient texture. Right now all render
         // passes target a `SurfaceTexture`, so supporting external textures is sufficient.
@@ -1041,7 +1051,6 @@ impl<'a> TransientBindMap<'a> {
             .expect("texture not materialized")
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn create_bind_group(
         &mut self,
         bind_map: &mut BindMap,
@@ -1107,6 +1116,7 @@ impl<'a> TransientBindMap<'a> {
                         });
                         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor {
                             label: None,
+                            usage: None,
                             dimension: Some(TextureViewDimension::D2),
                             aspect: TextureAspect::All,
                             mip_level_count: None,
@@ -1177,7 +1187,7 @@ impl<'a> TransientBindMap<'a> {
         &self,
         bind_map: &'a mut BindMap,
         bindings: &[ResourceProxy],
-    ) -> Vec<CpuBinding> {
+    ) -> Vec<CpuBinding<'_>> {
         // First pass is mutable; create buffers as needed
         for resource in bindings {
             match resource {
@@ -1192,7 +1202,7 @@ impl<'a> TransientBindMap<'a> {
                     _ => bind_map.materialize_cpu_buf(proxy),
                 },
                 ResourceProxy::Image(_) => todo!(),
-            };
+            }
         }
         // Second pass takes immutable references
         bindings

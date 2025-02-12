@@ -1,6 +1,32 @@
 // Copyright 2024 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+//! Vello tests.
+
+// LINEBENDER LINT SET - lib.rs - v2
+// See https://linebender.org/wiki/canonical-lints/
+// These lints aren't included in Cargo.toml because they
+// shouldn't apply to examples and tests
+#![warn(unused_crate_dependencies)]
+#![warn(clippy::print_stdout, clippy::print_stderr)]
+// Targeting e.g. 32-bit means structs containing usize can give false positives for 64-bit.
+#![cfg_attr(target_pointer_width = "64", warn(clippy::trivially_copy_pass_by_ref))]
+// END LINEBENDER LINT SET
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+// The following lints are part of the Linebender standard set,
+// but resolving them has been deferred for now.
+// Feel free to send a PR that solves one or more of these.
+#![allow(
+    missing_debug_implementations,
+    unreachable_pub,
+    missing_docs,
+    clippy::missing_assert_message,
+    clippy::shadow_unrelated,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::allow_attributes_without_reason
+)]
+
 use std::env;
 use std::fs::File;
 use std::io::ErrorKind;
@@ -11,9 +37,9 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 use scenes::{ExampleScene, ImageCache, SceneParams, SimpleText};
 use vello::kurbo::{Affine, Vec2};
-use vello::peniko::{Blob, Color, Format, Image};
+use vello::peniko::{color::palette, Blob, Color, Image, ImageFormat};
 use vello::wgpu::{
-    self, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, ImageCopyBuffer,
+    self, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, TexelCopyBufferInfo,
     TextureDescriptor, TextureFormat, TextureUsages,
 };
 use vello::{util::block_on_wgpu, util::RenderContext, AaConfig, RendererOptions, Scene};
@@ -29,7 +55,7 @@ pub use snapshot::{
 pub struct TestParams {
     pub width: u32,
     pub height: u32,
-    pub base_colour: Option<Color>,
+    pub base_color: Option<Color>,
     pub use_cpu: bool,
     pub name: String,
     pub anti_aliasing: AaConfig,
@@ -37,10 +63,10 @@ pub struct TestParams {
 
 impl TestParams {
     pub fn new(name: impl Into<String>, width: u32, height: u32) -> Self {
-        TestParams {
+        Self {
             width,
             height,
-            base_colour: None,
+            base_color: None,
             use_cpu: false,
             name: name.into(),
             anti_aliasing: AaConfig::Area,
@@ -86,7 +112,6 @@ pub async fn get_scene_image(params: &TestParams, scene: &Scene) -> Result<Image
     let mut renderer = vello::Renderer::new(
         device,
         RendererOptions {
-            surface_format: None,
             use_cpu: params.use_cpu,
             num_init_threads: NonZeroUsize::new(1),
             antialiasing_support: std::iter::once(params.anti_aliasing).collect(),
@@ -96,7 +121,7 @@ pub async fn get_scene_image(params: &TestParams, scene: &Scene) -> Result<Image
     let width = params.width;
     let height = params.height;
     let render_params = vello::RenderParams {
-        base_color: params.base_colour.unwrap_or(Color::BLACK),
+        base_color: params.base_color.unwrap_or(palette::css::BLACK),
         width,
         height,
         antialiasing_method: params.anti_aliasing,
@@ -133,9 +158,9 @@ pub async fn get_scene_image(params: &TestParams, scene: &Scene) -> Result<Image
     });
     encoder.copy_texture_to_buffer(
         target.as_image_copy(),
-        ImageCopyBuffer {
+        TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(padded_byte_width),
                 rows_per_image: None,
@@ -159,13 +184,13 @@ pub async fn get_scene_image(params: &TestParams, scene: &Scene) -> Result<Image
         result_unpadded.extend(&data[start..start + (width * 4) as usize]);
     }
     let data = Blob::new(Arc::new(result_unpadded));
-    let image = Image::new(data, Format::Rgba8, width, height);
+    let image = Image::new(data, ImageFormat::Rgba8, width, height);
     Ok(image)
 }
 
 pub fn write_png_to_file(
     params: &TestParams,
-    out_path: &std::path::Path,
+    out_path: &Path,
     image: &Image,
     max_size_in_bytes: Option<u64>,
 ) -> Result<(), anyhow::Error> {
@@ -239,8 +264,8 @@ pub fn encode_test_scene(mut test_scene: ExampleScene, test_params: &mut TestPar
     test_scene
         .function
         .render(&mut inner_scene, &mut scene_params);
-    if test_params.base_colour.is_none() {
-        test_params.base_colour = scene_params.base_color;
+    if test_params.base_color.is_none() {
+        test_params.base_color = scene_params.base_color;
     }
     if let Some(resolution) = scene_params.resolution {
         // Automatically scale the rendering to fill as much of the window as possible

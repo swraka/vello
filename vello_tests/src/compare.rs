@@ -10,7 +10,7 @@ use anyhow::{anyhow, bail, Result};
 use image::DynamicImage;
 use nv_flip::FlipPool;
 use vello::{
-    peniko::{Format, Image},
+    peniko::{Image, ImageFormat},
     Scene,
 };
 
@@ -105,8 +105,8 @@ pub async fn compare_gpu_cpu(scene: Scene, mut params: TestParams) -> Result<Gpu
     assert!(gpu_rendered.width == cpu_rendered.width && gpu_rendered.height == cpu_rendered.height,);
 
     // Compare the images using nv-flip
-    assert_eq!(cpu_rendered.format, Format::Rgba8);
-    assert_eq!(gpu_rendered.format, Format::Rgba8);
+    assert_eq!(cpu_rendered.format, ImageFormat::Rgba8);
+    assert_eq!(gpu_rendered.format, ImageFormat::Rgba8);
     let gpu_rendered_data: DynamicImage = image::RgbaImage::from_raw(
         cpu_rendered.width,
         cpu_rendered.height,
@@ -138,7 +138,7 @@ pub async fn compare_gpu_cpu(scene: Scene, mut params: TestParams) -> Result<Gpu
 
     let error_map = nv_flip::flip(cpu_flip, gpu_flip, nv_flip::DEFAULT_PIXELS_PER_DEGREE);
 
-    let pool = nv_flip::FlipPool::from_image(&error_map);
+    let pool = FlipPool::from_image(&error_map);
 
     Ok(GpuCpuComparison {
         statistics: Some(pool),

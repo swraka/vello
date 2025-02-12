@@ -12,7 +12,7 @@ pub struct Permutation {
 }
 
 pub fn parse(source: &str) -> HashMap<String, Vec<Permutation>> {
-    let mut map: HashMap<String, Vec<Permutation>> = Default::default();
+    let mut map: HashMap<String, Vec<Permutation>> = HashMap::default();
     let mut current_source: Option<String> = None;
     for line in source.lines() {
         let line = line.trim();
@@ -20,7 +20,7 @@ pub fn parse(source: &str) -> HashMap<String, Vec<Permutation>> {
             continue;
         }
         if let Some(line) = line.strip_prefix('+') {
-            if let Some(source) = &current_source {
+            if let Some(current_source) = &current_source {
                 let mut parts = line.split(':').map(|s| s.trim());
                 let Some(name) = parts.next() else {
                     continue;
@@ -29,7 +29,7 @@ pub fn parse(source: &str) -> HashMap<String, Vec<Permutation>> {
                 if let Some(define_list) = parts.next() {
                     defines.extend(define_list.split(' ').map(|s| s.trim().to_string()));
                 }
-                map.entry(source.to_string())
+                map.entry(current_source.to_string())
                     .or_default()
                     .push(Permutation {
                         name: name.to_string(),

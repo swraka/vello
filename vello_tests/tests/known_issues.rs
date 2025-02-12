@@ -3,9 +3,18 @@
 
 //! Reproductions for known bugs, to allow test driven development
 
+// The following lints are part of the Linebender standard set,
+// but resolving them has been deferred for now.
+// Feel free to send a PR that solves one or more of these.
+#![allow(
+    clippy::missing_assert_message,
+    clippy::should_panic_without_expect,
+    clippy::allow_attributes_without_reason
+)]
+
 use vello::{
     kurbo::{Affine, Rect},
-    peniko::{Color, Format},
+    peniko::{color::palette, ImageFormat},
     Scene,
 };
 use vello_tests::TestParams;
@@ -16,7 +25,7 @@ fn many_bins(use_cpu: bool) {
     scene.fill(
         vello::peniko::Fill::NonZero,
         Affine::IDENTITY,
-        Color::RED,
+        palette::css::RED,
         None,
         &Rect::new(-5., -5., 256. * 20., 256. * 20.),
     );
@@ -26,7 +35,7 @@ fn many_bins(use_cpu: bool) {
     };
     // To view, use VELLO_DEBUG_TEST=many_bins
     let image = vello_tests::render_then_debug_sync(&scene, &params).unwrap();
-    assert_eq!(image.format, Format::Rgba8);
+    assert_eq!(image.format, ImageFormat::Rgba8);
     let mut red_count = 0;
     let mut black_count = 0;
     for pixel in image.data.data().chunks_exact(4) {
@@ -53,8 +62,10 @@ fn many_bins(use_cpu: bool) {
     assert!(black_count > 0);
 }
 
+// With wgpu 23, this started mysteriously working on macOS (and only on macOS).
 #[test]
 #[cfg_attr(skip_gpu_tests, ignore)]
+#[cfg_attr(target_os = "macos", should_panic)]
 fn many_bins_gpu() {
     many_bins(false);
 }

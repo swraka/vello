@@ -12,7 +12,7 @@ use crate::{
 
 use {
     bytemuck::{offset_of, Pod, Zeroable},
-    peniko::Color,
+    peniko::color::{palette, OpaqueColor, Srgb},
     vello_encoding::{BumpAllocators, LineSoup, PathBbox},
 };
 pub(crate) struct DebugRenderer {
@@ -72,7 +72,7 @@ impl DebugRenderer {
             },
             // This mirrors the layout of the PathBbox structure.
             Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<PathBbox>() as u64,
+                array_stride: size_of::<PathBbox>() as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &[
                     wgpu::VertexAttribute {
@@ -103,7 +103,7 @@ impl DebugRenderer {
             },
             // This mirrors the layout of the LineSoup structure.
             Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<LineSoup>() as u64,
+                array_stride: size_of::<LineSoup>() as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &[
                     wgpu::VertexAttribute {
@@ -144,7 +144,7 @@ impl DebugRenderer {
             // render all points. All unpaired points alone get drawn by the `unpaired_points`
             // pipeline, so no point should get missed.
             Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<LineSoup>() as u64,
+                array_stride: size_of::<LineSoup>() as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &[wgpu::VertexAttribute {
                     format: wgpu::VertexFormat::Float32x2,
@@ -181,7 +181,7 @@ impl DebugRenderer {
             },
             // This mirrors the layout of the LineSoup structure.
             Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<LineEndpoint>() as u64,
+                array_stride: size_of::<LineEndpoint>() as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &[wgpu::VertexAttribute {
                     format: wgpu::VertexFormat::Float32x2,
@@ -207,8 +207,6 @@ impl DebugRenderer {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    // #[expect(clippy::too_many_arguments, reason="This function is internal, so the argument count doesn't cause issues for consumers.")]
     pub fn render(
         &self,
         recording: &mut Recording,
@@ -216,7 +214,7 @@ impl DebugRenderer {
         captured: &CapturedBuffers,
         bump: &BumpAllocators,
         params: &RenderParams,
-        downloads: &DebugDownloads,
+        downloads: &DebugDownloads<'_>,
         layers: DebugLayers,
     ) {
         if layers.is_empty() {
@@ -251,8 +249,8 @@ impl DebugRenderer {
         );
 
         let linepoints_uniforms = [
-            LinepointsUniforms::new(Color::DARK_CYAN, 10.),
-            LinepointsUniforms::new(Color::RED, 80.),
+            LinepointsUniforms::new(palette::css::DARK_CYAN.discard_alpha(), 10.),
+            LinepointsUniforms::new(palette::css::RED.discard_alpha(), 80.),
         ];
         let linepoints_uniforms_buf = recording.upload_uniform(
             "vello.debug.linepoints_uniforms",
@@ -301,7 +299,7 @@ impl DebugRenderer {
                     ResourceProxy::BufferRange {
                         proxy: linepoints_uniforms_buf,
                         offset: 0,
-                        size: std::mem::size_of::<LinepointsUniforms>() as u64,
+                        size: size_of::<LinepointsUniforms>() as u64,
                     },
                 ],
                 target,
@@ -318,8 +316,8 @@ impl DebugRenderer {
                     uniforms_buf,
                     ResourceProxy::BufferRange {
                         proxy: linepoints_uniforms_buf,
-                        offset: std::mem::size_of::<LinepointsUniforms>() as u64,
-                        size: std::mem::size_of::<LinepointsUniforms>() as u64,
+                        offset: size_of::<LinepointsUniforms>() as u64,
+                        size: size_of::<LinepointsUniforms>() as u64,
                     },
                 ],
                 target,
@@ -353,13 +351,9 @@ struct LinepointsUniforms {
 }
 
 impl LinepointsUniforms {
-    fn new(color: Color, point_size: f32) -> Self {
+    fn new(color: OpaqueColor<Srgb>, point_size: f32) -> Self {
         Self {
-            point_color: [
-                color.r as f32 / 255.,
-                color.g as f32 / 255.,
-                color.b as f32 / 255.,
-            ],
+            point_color: color.components,
             point_size,
             _pad0: [0; 30],
             _pad1: [0; 30],

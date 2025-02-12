@@ -21,7 +21,7 @@ fn draw_leaf_main(
     info: &mut [u32],
     clip_inp: &mut [Clip],
 ) {
-    let num_blocks_total = (config.layout.n_draw_objects as usize + (WG_SIZE - 1)) / WG_SIZE;
+    let num_blocks_total = (config.layout.n_draw_objects as usize).div_ceil(WG_SIZE);
     let n_blocks_base = num_blocks_total / WG_SIZE;
     let remainder = num_blocks_total % WG_SIZE;
     let mut prefix = DrawMonoid::default();
@@ -76,7 +76,7 @@ fn draw_leaf_main(
                         info[di + 3] = f32::to_bits(line_c);
                     }
                     DrawTag::RADIAL_GRADIENT => {
-                        const GRADIENT_EPSILON: f32 = 1.0f32 / (1 << 12) as f32;
+                        const GRADIENT_EPSILON: f32 = 1.0_f32 / (1 << 12) as f32;
                         info[di] = draw_flags;
                         let mut p0 = Vec2::new(
                             f32::from_bits(scene[dd as usize + 1]),
@@ -175,6 +175,7 @@ fn draw_leaf_main(
                         info[di + 6] = f32::to_bits(xform.0[5]);
                         info[di + 7] = scene[dd as usize];
                         info[di + 8] = scene[dd as usize + 1];
+                        info[di + 9] = scene[dd as usize + 2];
                     }
                     DrawTag::BLUR_RECT => {
                         info[di] = draw_flags;
@@ -207,7 +208,7 @@ fn draw_leaf_main(
     }
 }
 
-pub fn draw_leaf(n_wg: u32, resources: &[CpuBinding]) {
+pub fn draw_leaf(n_wg: u32, resources: &[CpuBinding<'_>]) {
     let config = resources[0].as_typed();
     let scene = resources[1].as_slice();
     let reduced = resources[2].as_slice();

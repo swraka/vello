@@ -3,8 +3,10 @@
 
 //! Utility functions for Euler Spiral based stroke expansion.
 
-// Use the same constants as the f64 version.
-#![allow(clippy::excessive_precision)]
+#![expect(
+    clippy::excessive_precision,
+    reason = "Uses the same constants as the f64 version"
+)]
 
 use super::util::Vec2;
 use std::f32::consts::FRAC_PI_4;
@@ -70,7 +72,7 @@ impl CubicParams {
     /// near-semicircle, preserving G1 continuity), but the analytic error
     /// calculation would be a huge overestimate. In that case, we just return
     /// a rough estimate of the distance between the chord and the spiral segment.
-    pub fn from_points_derivs(p0: Vec2, p1: Vec2, q0: Vec2, q1: Vec2, dt: f32) -> Self {
+    pub(crate) fn from_points_derivs(p0: Vec2, p1: Vec2, q0: Vec2, q1: Vec2, dt: f32) -> Self {
         let chord = p1 - p0;
         let chord_squared = chord.length_squared();
         let chord_len = chord_squared.sqrt();
@@ -79,7 +81,7 @@ impl CubicParams {
             // This error estimate was determined empirically through randomized
             // testing, though it is likely it can be derived analytically.
             let chord_err = ((9. / 32.0) * (q0.length_squared() + q1.length_squared())).sqrt() * dt;
-            return CubicParams {
+            return Self {
                 th0: 0.0,
                 th1: 0.0,
                 chord_len: TANGENT_THRESH,
@@ -150,7 +152,7 @@ impl CubicParams {
             ctr + 1.55 * aerr + halo_symm + halo_asymm
         };
         err *= chord_len;
-        CubicParams {
+        Self {
             th0,
             th1,
             chord_len,
@@ -160,7 +162,7 @@ impl CubicParams {
 }
 
 impl EulerParams {
-    pub fn from_angles(th0: f32, th1: f32) -> EulerParams {
+    pub(crate) fn from_angles(th0: f32, th1: f32) -> Self {
         let k0 = th0 + th1;
         let dth = th1 - th0;
         let d2 = dth * dth;
@@ -182,10 +184,10 @@ impl EulerParams {
         let b = -1. / 24. + d2 * 0.0024702380951963226 - d2 * d2 * 3.7297408997537985e-05;
         let c = 1. / 1920. - d2 * 4.87350869747975e-05 - k2 * 3.1001936068463107e-06;
         ch += (b + c * k2) * k2;
-        EulerParams { th0, k0, k1, ch }
+        Self { th0, k0, k1, ch }
     }
 
-    pub fn eval_th(&self, t: f32) -> f32 {
+    pub(crate) fn eval_th(&self, t: f32) -> f32 {
         (self.k0 + 0.5 * self.k1 * (t - 1.0)) * t - self.th0
     }
 
@@ -213,12 +215,12 @@ impl EulerParams {
 }
 
 impl EulerSeg {
-    pub fn from_params(p0: Vec2, p1: Vec2, params: EulerParams) -> Self {
-        EulerSeg { p0, p1, params }
+    pub(crate) fn from_params(p0: Vec2, p1: Vec2, params: EulerParams) -> Self {
+        Self { p0, p1, params }
     }
 
-    #[allow(unused)]
-    pub fn eval(&self, t: f32) -> Vec2 {
+    #[expect(unused, reason = "Unclear why this code exists")]
+    pub(crate) fn eval(&self, t: f32) -> Vec2 {
         let Vec2 { x, y } = self.params.eval(t);
         let chord = self.p1 - self.p0;
         Vec2::new(
@@ -229,7 +231,7 @@ impl EulerSeg {
 
     // Note: offset provided is normalized so that 1 = chord length, while
     // the return value is in the same coordinate space as the endpoints.
-    pub fn eval_with_offset(&self, t: f32, normalized_offset: f32) -> Vec2 {
+    pub(crate) fn eval_with_offset(&self, t: f32, normalized_offset: f32) -> Vec2 {
         let chord = self.p1 - self.p0;
         let Vec2 { x, y } = self.params.eval_with_offset(t, normalized_offset);
         Vec2::new(
@@ -301,7 +303,7 @@ pub(crate) fn espc_int_approx(x: f32) -> f32 {
     let a = if y < BREAK1 {
         (SIN_SCALE * y).sin() * (1.0 / SIN_SCALE)
     } else if y < BREAK2 {
-        (8.0f32.sqrt() / 3.0) * (y - 1.0) * (y - 1.0).abs().sqrt() + FRAC_PI_4
+        (8.0_f32.sqrt() / 3.0) * (y - 1.0) * (y - 1.0).abs().sqrt() + FRAC_PI_4
     } else {
         let (a, b, c) = if y < BREAK3 {
             (QUAD_A1, QUAD_B1, QUAD_C1)
@@ -320,7 +322,7 @@ pub(crate) fn espc_int_inv_approx(x: f32) -> f32 {
     } else if y < 0.903249293595206 {
         let b = y - FRAC_PI_4;
         let u = b.abs().powf(2. / 3.).copysign(b);
-        u * (9.0f32 / 8.).cbrt() + 1.0
+        u * (9.0_f32 / 8.).cbrt() + 1.0
     } else {
         let (u, v, w) = if y < 2.038857793595206 {
             const B: f32 = 0.5 * QUAD_B1 / QUAD_A1;

@@ -1,6 +1,16 @@
 // Copyright 2023 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+//! Headless
+
+// The following lints are part of the Linebender standard set,
+// but resolving them has been deferred for now.
+// Feel free to send a PR that solves one or more of these.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::allow_attributes_without_reason
+)]
+
 use std::fs::File;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -9,9 +19,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use scenes::{ImageCache, SceneParams, SceneSet, SimpleText};
 use vello::kurbo::{Affine, Vec2};
+use vello::peniko::color::palette;
 use vello::util::RenderContext;
 use vello::wgpu::{
-    self, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, ImageCopyBuffer,
+    self, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Extent3d, TexelCopyBufferInfo,
     TextureDescriptor, TextureFormat, TextureUsages,
 };
 use vello::{util::block_on_wgpu, RendererOptions, Scene};
@@ -86,7 +97,6 @@ async fn render(mut scenes: SceneSet, index: usize, args: &Args) -> Result<()> {
     let mut renderer = vello::Renderer::new(
         device,
         RendererOptions {
-            surface_format: None,
             use_cpu: args.use_cpu,
             num_init_threads: NonZeroUsize::new(1),
             antialiasing_support: vello::AaSupport::area_only(),
@@ -135,7 +145,7 @@ async fn render(mut scenes: SceneSet, index: usize, args: &Args) -> Result<()> {
             .args
             .base_color
             .or(scene_params.base_color)
-            .unwrap_or(vello::peniko::Color::BLACK),
+            .unwrap_or(palette::css::BLACK),
         width,
         height,
         antialiasing_method: vello::AaConfig::Area,
@@ -174,9 +184,9 @@ async fn render(mut scenes: SceneSet, index: usize, args: &Args) -> Result<()> {
     });
     encoder.copy_texture_to_buffer(
         target.as_image_copy(),
-        ImageCopyBuffer {
+        TexelCopyBufferInfo {
             buffer: &buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(padded_byte_width),
                 rows_per_image: None,
@@ -206,10 +216,10 @@ async fn render(mut scenes: SceneSet, index: usize, args: &Args) -> Result<()> {
         .join(&example_scene.config.name)
         .with_extension("png");
     let mut file = File::create(&out_path)?;
-    let mut encoder = png::Encoder::new(&mut file, width, height);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header()?;
+    let mut png_encoder = png::Encoder::new(&mut file, width, height);
+    png_encoder.set_color(png::ColorType::Rgba);
+    png_encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = png_encoder.write_header()?;
     writer.write_image_data(&result_unpadded)?;
     writer.finish()?;
     println!("Wrote result ({width}x{height}) to {out_path:?}");

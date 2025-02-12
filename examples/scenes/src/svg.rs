@@ -12,7 +12,7 @@ use web_time::Instant;
 use anyhow::Result;
 use vello::{
     kurbo::{Affine, Rect, Stroke, Vec2},
-    peniko::{Color, Fill},
+    peniko::{color::palette, Fill},
     Scene,
 };
 
@@ -106,7 +106,7 @@ fn render_svg_rec(items: &[crate::pico_svg::Item]) -> Scene {
 pub fn svg_function_of<R: AsRef<str>>(
     name: String,
     contents: impl FnOnce() -> R + Send + 'static,
-) -> impl FnMut(&mut Scene, &mut SceneParams) {
+) -> impl FnMut(&mut Scene, &mut SceneParams<'_>) {
     fn render_svg_contents(name: &str, contents: &str) -> (Scene, Vec2) {
         use crate::pico_svg::*;
         let start = Instant::now();
@@ -124,7 +124,7 @@ pub fn svg_function_of<R: AsRef<str>>(
                 error_scene.fill(
                     Fill::NonZero,
                     Affine::IDENTITY,
-                    Color::FUCHSIA,
+                    palette::css::FUCHSIA,
                     None,
                     &Rect::new(0.0, 0.0, 1.0, 1.0),
                 );
@@ -185,7 +185,7 @@ pub fn svg_function_of<R: AsRef<str>>(
                     None,
                     48.,
                     None,
-                    vello::kurbo::Affine::translate((110.0, 600.0)),
+                    Affine::translate((110.0, 600.0)),
                     &format!("Loading {name}"),
                 ),
                 Err(RecvTimeoutError::Disconnected) => {

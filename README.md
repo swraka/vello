@@ -15,8 +15,8 @@ For now, prefer updating the package-level readmes, e.g. vello/README.md.
 
 [![Linebender Zulip](https://img.shields.io/badge/Linebender-%23gpu-blue?logo=Zulip)](https://xi.zulipchat.com/#narrow/stream/197075-gpu)
 [![dependency status](https://deps.rs/repo/github/linebender/vello/status.svg)](https://deps.rs/repo/github/linebender/vello)
-[![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](#license)
-[![wgpu version](https://img.shields.io/badge/wgpu-v22.0.0-orange.svg)](https://crates.io/crates/wgpu)
+[![Apache 2.0 or MIT license.](https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue.svg)](#license)
+[![wgpu version](https://img.shields.io/badge/wgpu-v23.0.1-orange.svg)](https://crates.io/crates/wgpu)
 
 [![Crates.io](https://img.shields.io/crates/v/vello.svg)](https://crates.io/crates/vello)
 [![Docs](https://docs.rs/vello/badge.svg)](https://docs.rs/vello)
@@ -76,52 +76,47 @@ use vello::{
 let (width, height) = ...;
 let device: wgpu::Device = ...;
 let queue: wgpu::Queue = ...;
-let surface: wgpu::Surface<'_> = ...;
-let texture_format: wgpu::TextureFormat = ...;
 let mut renderer = Renderer::new(
    &device,
    RendererOptions {
-      surface_format: Some(texture_format),
       use_cpu: false,
-      antialiasing_support: AaSupport::all(),
+      antialiasing_support: vello::AaSupport::all(),
       num_init_threads: NonZeroUsize::new(1),
    },
 ).expect("Failed to create renderer");
-
 // Create scene and draw stuff in it
-let mut scene = Scene::new();
+let mut scene = vello::Scene::new();
 scene.fill(
-   Fill::NonZero,
-   Affine::IDENTITY,
-   Color::rgb8(242, 140, 168),
+   vello::peniko::Fill::NonZero,
+   vello::Affine::IDENTITY,
+   vello::Color::from_rgb8(242, 140, 168),
    None,
-   &Circle::new((420.0, 200.0), 120.0),
+   &vello::Circle::new((420.0, 200.0), 120.0),
 );
-
 // Draw more stuff
 scene.push_layer(...);
 scene.fill(...);
 scene.stroke(...);
 scene.pop_layer(...);
+let texture = device.create_texture(&...);
 
-// Render to your window/buffer/etc.
-let surface_texture = surface.get_current_texture()
-   .expect("failed to get surface texture");
+// Render to a wgpu Texture
 renderer
-   .render_to_surface(
+   .render_to_texture(
       &device,
       &queue,
       &scene,
-      &surface_texture,
-      &RenderParams {
-         base_color: Color::BLACK, // Background color
+      &texture,
+      &vello::RenderParams {
+         base_color: palette::css::BLACK, // Background color
          width,
          height,
          antialiasing_method: AaConfig::Msaa16,
       },
    )
-   .expect("Failed to render to surface");
-surface_texture.present();
+   .expect("Failed to render to a texture");
+// Do things with `texture`, such as blitting it to the Surface using
+// wgpu::util::TextureBlitter
 ```
 
 See the [`examples`](https://github.com/linebender/vello/tree/main/examples) directory for code that integrates with frameworks like winit.
@@ -231,7 +226,7 @@ VELLO_STATIC_LOG="vello=trace" VELLO_STATIC_ARGS="--test-scenes" cargo apk run -
 
 ## Minimum supported Rust Version (MSRV)
 
-This version of Vello has been verified to compile with **Rust 1.75** and later.
+This version of Vello has been verified to compile with **Rust 1.82** and later.
 
 Future versions of Vello might increase the Rust version requirement.
 It will not be treated as a breaking change and as such can even happen with small patch releases.

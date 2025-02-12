@@ -32,7 +32,7 @@ var<storage, read_write> clip_inp: array<ClipInp>;
 
 #import util
 
-let WG_SIZE = 256u;
+const WG_SIZE = 256u;
 
 fn read_transform(transform_base: u32, ix: u32) -> Transform {
     let base = transform_base + ix * 6u;
@@ -253,6 +253,7 @@ fn main(
                     info[di + 6u] = bitcast<u32>(inv.translate.y);
                     info[di + 7u] = scene[dd];
                     info[di + 8u] = scene[dd + 1u];
+                    info[di + 9u] = scene[dd + 2u];
                 }
                 case DRAWTAG_BLURRED_ROUNDED_RECT: {
                     info[di] = draw_flags;

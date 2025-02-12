@@ -4,14 +4,14 @@
 use core::fmt;
 use std::{
     env,
-    io::{self, ErrorKind},
+    io::ErrorKind,
     path::{Path, PathBuf},
 };
 
 use image::{DynamicImage, ImageError};
 use nv_flip::FlipPool;
 use vello::{
-    peniko::{Format, Image},
+    peniko::{Image, ImageFormat},
     Scene,
 };
 
@@ -75,7 +75,7 @@ impl Snapshot<'_> {
         }
     }
 
-    fn handle_failure(&mut self, message: fmt::Arguments) -> Result<()> {
+    fn handle_failure(&mut self, message: fmt::Arguments<'_>) -> Result<()> {
         if env_var_relates_to("VELLO_TEST_UPDATE", &self.params.name, self.params.use_cpu) {
             if !self.params.use_cpu {
                 write_png_to_file(
@@ -123,8 +123,8 @@ pub enum SnapshotDirectory {
 impl SnapshotDirectory {
     fn max_size_in_bytes(self) -> u64 {
         match self {
-            SnapshotDirectory::Smoke => 4 * 1024, /* 4KiB */
-            SnapshotDirectory::Lfs => 128 * 1024, /* 128KiB */
+            Self::Smoke => 4 * 1024, /* 4KiB */
+            Self::Lfs => 128 * 1024, /* 128KiB */
         }
     }
 }
@@ -154,7 +154,7 @@ pub async fn snapshot_test(
     scene: Scene,
     params: &TestParams,
     directory: SnapshotDirectory,
-) -> Result<Snapshot> {
+) -> Result<Snapshot<'_>> {
     let raw_rendered = render_then_debug(&scene, params).await?;
     snapshot_test_image(raw_rendered, params, directory)
 }
@@ -167,7 +167,7 @@ pub fn snapshot_test_image(
     raw_rendered: Image,
     params: &TestParams,
     directory: SnapshotDirectory,
-) -> Result<Snapshot> {
+) -> Result<Snapshot<'_>> {
     let reference_path = snapshot_dir(directory)
         .join(&params.name)
         .with_extension("png");
@@ -198,7 +198,7 @@ pub fn snapshot_test_image(
 
             contents.into_rgb8()
         }
-        Err(ImageError::IoError(e)) if e.kind() == io::ErrorKind::NotFound => {
+        Err(ImageError::IoError(e)) if e.kind() == ErrorKind::NotFound => {
             if env_var_relates_to("VELLO_TEST_CREATE", &params.name, params.use_cpu) {
                 if !params.use_cpu {
                     write_png_to_file(
@@ -284,7 +284,7 @@ pub fn snapshot_test_image(
         unreachable!();
     }
     // Compare the images using nv-flip
-    assert_eq!(raw_rendered.format, Format::Rgba8);
+    assert_eq!(raw_rendered.format, ImageFormat::Rgba8);
     let rendered_data: DynamicImage = image::RgbaImage::from_raw(
         raw_rendered.width,
         raw_rendered.height,
@@ -306,7 +306,7 @@ pub fn snapshot_test_image(
 
     let error_map = nv_flip::flip(expected, rendered, nv_flip::DEFAULT_PIXELS_PER_DEGREE);
 
-    let pool = nv_flip::FlipPool::from_image(&error_map);
+    let pool = FlipPool::from_image(&error_map);
 
     Ok(Snapshot {
         statistics: Some(pool),
